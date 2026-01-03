@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Maintainer](https://img.shields.io/badge/maintainer-acdcnow-blue)](https://github.com/acdcnow)
-[![Version](https://img.shields.io/badge/version-1.1.6-green)]()
+[![Version](https://img.shields.io/badge/version-1.1.7-green)]()
 
 A custom component for Home Assistant to retrieve energy data from Austrian grid operators (Smart Meter) via their web portals.
 
