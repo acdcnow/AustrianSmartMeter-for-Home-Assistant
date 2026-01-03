@@ -1,0 +1,11 @@
+{
+  "name": "Austria Smartmeter for Home Assistant",
+  "content_in_root": false,
+  "zip_release": false,
+  "filename": "asm.zip",
+  "render_readme": true,
+  "homeassistant": "2025.12.5",
+  "domains": [
+    "asm"
+  ]
+}
