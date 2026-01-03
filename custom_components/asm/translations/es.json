@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Provider",
+        "description": "Choose your energy grid operator.",
+        "data": {
+          "provider": "Grid Operator"
+        }
+      },
+      "credentials": {
+        "title": "Authentication",
+        "description": "Enter credentials for {provider_name}.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connection failed",
+      "invalid_auth": "Invalid authentication",
+      "no_contracts": "No Smart Meter contracts found."
+    },
+    "abort": {
+      "already_configured": "Account is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "scan_interval": "Update Interval (minutes)"
+        }
+      }
+    }
+  }
+}
