@@ -1,0 +1,18 @@
+{
+    "domain": "asm",
+    "name": "Austria Smartmeter for Home Asssistant",
+    "codeowners": [
+        "@acdcnow"
+    ],
+    "config_flow": true,
+    "dependencies": [],
+    "documentation": "https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant",
+    "iot_class": "cloud_polling",
+    "issue_tracker": "https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues",
+    "requirements": [
+        "lxml",
+        "requests",
+        "python-dateutil"
+    ],
+    "version": "1.1.6"
+}
