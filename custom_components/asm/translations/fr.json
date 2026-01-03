@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sélectionner le fournisseur",
+        "description": "Veuillez choisir votre opérateur de réseau dans la liste ci-dessous.",
+        "data": {
+          "provider": "Fournisseur"
+        }
+      },
+      "credentials": {
+        "title": "Authentification",
+        "description": "Veuillez entrer vos identifiants pour **{provider_name}**.",
+        "data": {
+          "username": "Nom d'utilisateur (E-mail)",
+          "password": "Mot de passe"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Échec de la connexion. Veuillez vérifier votre connexion Internet.",
+      "invalid_auth": "Authentification échouée. Veuillez vérifier votre nom d'utilisateur et mot de passe.",
+      "no_contracts": "Aucun point de comptage trouvé dans ce compte.",
+      "unknown": "Erreur inattendue."
+    },
+    "abort": {
+      "already_configured": "Ce compte est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "scan_interval": "Intervalle de mise à jour (minutes)"
+        }
+      }
+    }
+  }
+}
