@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Energy Provider",
+        "description": "Please choose your grid operator from the list below.",
+        "data": {
+          "provider": "Provider"
+        }
+      },
+      "credentials": {
+        "title": "Authentication",
+        "description": "Please enter your credentials for **{provider_name}**.",
+        "data": {
+          "username": "Username (Email)",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connection failed. Please check your internet connection.",
+      "invalid_auth": "Authentication failed. Please check your username and password.",
+      "no_contracts": "No metering points (contracts) found in this account.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Austria Smartmeter Options",
+        "data": {
+          "scan_interval": "Update Interval (minutes)"
+        }
+      }
+    }
+  }
+}
