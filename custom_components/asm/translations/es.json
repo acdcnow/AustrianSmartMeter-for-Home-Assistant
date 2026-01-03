@@ -2,36 +2,37 @@
   "config": {
     "step": {
       "user": {
-        "title": "Select Provider",
-        "description": "Choose your energy grid operator.",
+        "title": "Seleccionar proveedor",
+        "description": "Por favor, elija su operador de red de la lista a continuación.",
         "data": {
-          "provider": "Grid Operator"
+          "provider": "Proveedor"
         }
       },
       "credentials": {
-        "title": "Authentication",
-        "description": "Enter credentials for {provider_name}.",
+        "title": "Autenticación",
+        "description": "Por favor, introduzca sus credenciales para **{provider_name}**.",
         "data": {
-          "username": "Username",
-          "password": "Password"
+          "username": "Nombre de usuario (Email)",
+          "password": "Contraseña"
         }
       }
     },
     "error": {
-      "cannot_connect": "Connection failed",
-      "invalid_auth": "Invalid authentication",
-      "no_contracts": "No Smart Meter contracts found."
+      "cannot_connect": "Conexión fallida. Por favor, compruebe su conexión a internet.",
+      "invalid_auth": "Autenticación fallida. Por favor, compruebe su usuario y contraseña.",
+      "no_contracts": "No se encontraron puntos de suministro en esta cuenta.",
+      "unknown": "Error inesperado."
     },
     "abort": {
-      "already_configured": "Account is already configured"
+      "already_configured": "Esta cuenta ya está configurada."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Options",
+        "title": "Opciones",
         "data": {
-          "scan_interval": "Update Interval (minutes)"
+          "scan_interval": "Intervalo de actualización (minutos)"
         }
       }
     }
