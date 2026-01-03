@@ -91,11 +91,12 @@ logger:
   default: info
   logs:
     custom_components.asm: debug
+```
 
 After a restart, check the Home Assistant logs for detailed output.
 
 ## ⚠️ Disclaimer
 This is a private community project and is not officially affiliated with Wiener Netze, Netz NÖ, or other grid operators. Use at your own risk. APIs may change at any time.
 
-##📄 License
+## 📄 License
 MIT License
