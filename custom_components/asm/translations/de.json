@@ -3,33 +3,34 @@
     "step": {
       "user": {
         "title": "Netzbetreiber wählen",
-        "description": "Bitte wählen Sie Ihren Netzbetreiber aus.",
+        "description": "Bitte wählen Sie Ihren Netzbetreiber aus der Liste.",
         "data": {
           "provider": "Netzbetreiber"
         }
       },
       "credentials": {
         "title": "Anmeldung",
-        "description": "Geben Sie die Zugangsdaten für {provider_name} ein.",
+        "description": "Bitte geben Sie Ihre Zugangsdaten für **{provider_name}** ein.",
         "data": {
-          "username": "Benutzername",
+          "username": "Benutzername (E-Mail)",
           "password": "Passwort"
         }
       }
     },
     "error": {
-      "cannot_connect": "Verbindung fehlgeschlagen",
-      "invalid_auth": "Ungültige Zugangsdaten",
-      "no_contracts": "Keine Zählpunkte gefunden."
+      "cannot_connect": "Verbindung fehlgeschlagen. Bitte prüfen Sie Ihre Internetverbindung.",
+      "invalid_auth": "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Benutzername und Passwort.",
+      "no_contracts": "Keine Zählpunkte in diesem Konto gefunden.",
+      "unknown": "Unerwarteter Fehler."
     },
     "abort": {
-      "already_configured": "Dieses Konto ist bereits eingerichtet"
+      "already_configured": "Dieses Konto ist bereits konfiguriert."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Optionen",
+        "title": "Einstellungen",
         "data": {
           "scan_interval": "Aktualisierungsintervall (Minuten)"
         }
