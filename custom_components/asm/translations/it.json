@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Seleziona Fornitore",
+        "description": "Scegli il tuo operatore di rete dalla lista qui sotto.",
+        "data": {
+          "provider": "Fornitore"
+        }
+      },
+      "credentials": {
+        "title": "Autenticazione",
+        "description": "Inserisci le tue credenziali per **{provider_name}**.",
+        "data": {
+          "username": "Nome utente (Email)",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connessione fallita. Controlla la tua connessione internet.",
+      "invalid_auth": "Autenticazione fallita. Controlla username e password.",
+      "no_contracts": "Nessun punto di misurazione trovato in questo account.",
+      "unknown": "Errore imprevisto."
+    },
+    "abort": {
+      "already_configured": "Questo account è già configurato."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opzioni",
+        "data": {
+          "scan_interval": "Intervallo di aggiornamento (minuti)"
+        }
+      }
+    }
+  }
+}
