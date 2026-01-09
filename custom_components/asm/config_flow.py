@@ -29,8 +29,11 @@ class AustriaSmartMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the initial step (Provider Selection)."""
+        LOGGER.debug("ConfigFlow: async_step_user called with input: %s", user_input)
+        
         if user_input is not None:
             self.context["provider"] = user_input[CONF_PROVIDER]
+            LOGGER.debug("ConfigFlow: Provider selected: %s", user_input[CONF_PROVIDER])
             return await self.async_step_credentials()
 
         return self.async_show_form(
@@ -42,6 +45,8 @@ class AustriaSmartMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle credentials input."""
+        LOGGER.debug("ConfigFlow: async_step_credentials called with input: %s", "HIDDEN" if user_input else "None")
+        
         errors: dict[str, str] = {}
         provider = self.context.get("provider", PROVIDER_WIENER_NETZE)
 
@@ -53,25 +58,30 @@ class AustriaSmartMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             try:
+                LOGGER.debug("ConfigFlow: Attempting login for user %s with provider %s", username, provider)
                 client = get_client(provider, username, password)
                 await self.hass.async_add_executor_job(client.login)
                 
                 contracts = await self.hass.async_add_executor_job(client.zaehlpunkte)
+                LOGGER.debug("ConfigFlow: Found %s contracts", len(contracts) if contracts else 0)
 
                 if not contracts:
+                    LOGGER.error("ConfigFlow: Login successful but no contracts found.")
                     errors["base"] = "no_contracts"
                 else:
                     data = user_input.copy()
                     data[CONF_PROVIDER] = provider
+                    LOGGER.debug("ConfigFlow: Creating entry for %s", username)
                     return self.async_create_entry(
                         title=f"{PROVIDERS.get(provider, provider)} ({username})",
                         data=data,
                     )
 
-            except SmartmeterLoginError:
+            except SmartmeterLoginError as e:
+                LOGGER.warning("ConfigFlow: Login error: %s", e)
                 errors["base"] = "invalid_auth"
-            except Exception:
-                LOGGER.exception("Unexpected exception during config flow")
+            except Exception as e:
+                LOGGER.exception("ConfigFlow: Unexpected exception during login: %s", e)
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
@@ -88,6 +98,7 @@ class AustriaSmartMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
+        LOGGER.debug("ConfigFlow: async_get_options_flow called for entry %s", config_entry.entry_id)
         return AustriaSmartMeterOptionsFlowHandler(config_entry)
 
 
@@ -96,16 +107,23 @@ class AustriaSmartMeterOptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        # FIX: Variable umbenannt zu self.entry, um Konflikt mit Property 'config_entry' zu vermeiden
+        LOGGER.debug("OptionsFlow: Initializing for entry %s", config_entry.entry_id)
+        # Using self.entry to avoid conflict with read-only property self.config_entry in newer HA versions
         self.entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Manage the options."""
+        LOGGER.debug("OptionsFlow: async_step_init called with input: %s", user_input)
+        
         if user_input is not None:
+            LOGGER.debug("OptionsFlow: Saving options: %s", user_input)
             return self.async_create_entry(title="", data=user_input)
 
         try:
-            # FIX: Zugriff jetzt über self.entry statt self.config_entry
+            # Check if self.entry is set correctly
+            if not hasattr(self, 'entry') or self.entry is None:
+                LOGGER.error("OptionsFlow: self.entry is missing or None!")
+                
             current = self.entry.options.get(CONF_SCAN_INTERVAL)
             
             if current is None:
@@ -115,6 +133,7 @@ class AustriaSmartMeterOptionsFlowHandler(config_entries.OptionsFlow):
                 current = DEFAULT_SCAN_INTERVAL
             
             current = int(current)
+            LOGGER.debug("OptionsFlow: Current scan interval is %s", current)
 
         except Exception as e:
             LOGGER.error(f"Failed to read current options: {e}. Using defaults.")
