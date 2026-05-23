@@ -30,7 +30,7 @@ class NetzNoeClient(SmartmeterClient):
         try:
             login_data = {"user": self.username, "pwd": self.password, "remember": False}
             res = self.session.post(
-                "https://smartmeter.netz-noe.at/orchestration/Authenticaton/Login", 
+                "https://smartmeter.netz-noe.at/orchestration/Authentication/Login", 
                 json=login_data
             )
             if res.status_code != 200 or not res.json().get("success"):
