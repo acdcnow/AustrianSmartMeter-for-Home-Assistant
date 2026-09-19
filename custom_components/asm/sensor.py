@@ -1,6 +1,8 @@
 """Sensor platform for Austria Smartmeter."""
 from __future__ import annotations
+
 from typing import Any
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -9,10 +11,42 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfEnergy
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .const import DOMAIN, OBIS_NAMES, LOGGER, PROVIDER_WIENER_NETZE, PROVIDER_NETZ_NOE
+
+from .const import DOMAIN, OBIS_NAMES, PROVIDER_NETZ_NOE, PROVIDER_WIENER_NETZE
 from .coordinator import AustriaSmartMeterCoordinator
+
+# Readings that describe the consumption of a period (and therefore reset every
+# day) instead of a cumulative meter reading.
+_PERIOD_VALUE_TYPES = {"DAY", "CONSUMPTION", "QUARTER_HOUR"}
+
+# Only devices with this state class may carry a `last_reset` attribute.
+_PERIOD_STATE_CLASS = SensorStateClass.TOTAL
+
+_PROVIDER_PORTALS = {
+    PROVIDER_WIENER_NETZE: ("Wiener Netze", "https://smartmeter-web.wienernetze.at/"),
+    PROVIDER_NETZ_NOE: ("Netz Niederösterreich (EVN)", "https://smartmeter.netz-noe.at/"),
+}
+
+
+def _as_float(value: Any) -> float | None:
+    """Return ``value`` as a float, or None when it is not a number."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _provider_details(provider_id: str | None) -> tuple[str, str | None]:
+    """Return the manufacturer and portal URL for a provider."""
+    return _PROVIDER_PORTALS.get(
+        provider_id or "", ("Austria Smartmeter Integration", None)
+    )
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -20,8 +54,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Austria Smartmeter sensors."""
-    coordinator: AustriaSmartMeterCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities = []
+    coordinator: AustriaSmartMeterCoordinator = entry.runtime_data
+    entities: list[SensorEntity] = []
 
     # Iterate over all Zählpunkte found in the data
     for zp_num, zp_data in coordinator.data.items():
@@ -30,31 +64,56 @@ async def async_setup_entry(
         info = zp_data.get("info", {})
 
         # 1. Main OBIS Sensors (Zählerstände)
-        if isinstance(readings, dict): readings = [readings]
-        if readings:
-            for reading_data in readings:
-                if "obisCode" in reading_data:
-                    entities.append(AustriaSmartMeterSensor(coordinator, zp_num, reading_data, info))
+        if isinstance(readings, dict):
+            readings = [readings]
+        for reading_data in readings:
+            if isinstance(reading_data, dict) and "obisCode" in reading_data:
+                entities.append(
+                    AustriaSmartMeterSensor(coordinator, zp_num, reading_data, info)
+                )
 
         # 2. Diagnostic Sensors (Static Info & Address)
         if "zaehlpunktnummer" in info:
-             entities.append(AustriaSmartMeterDiagnostic(coordinator, zp_num, "zaehlpunktnummer", "Metering Point ID", info["zaehlpunktnummer"]))
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "zaehlpunktnummer", "Metering Point ID", info["zaehlpunktnummer"]
+            ))
         if "geschaeftspartner" in info:
-             entities.append(AustriaSmartMeterDiagnostic(coordinator, zp_num, "customer_id", "Customer ID", info["geschaeftspartner"]))
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "customer_id", "Customer ID", info["geschaeftspartner"]
+            ))
         if "isSmartMeterMarketReady" in info:
-             entities.append(AustriaSmartMeterDiagnostic(coordinator, zp_num, "market_ready", "Market Ready", info["isSmartMeterMarketReady"]))
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "market_ready", "Market Ready", info["isSmartMeterMarketReady"]
+            ))
         if "isActive" in info:
-             entities.append(AustriaSmartMeterDiagnostic(coordinator, zp_num, "is_active", "Contract Active", info["isActive"]))
-        
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "is_active", "Contract Active", info["isActive"]
+            ))
+        if "smartMeterType" in info and info["smartMeterType"]:
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "smart_meter_type", "Smart Meter Type", info["smartMeterType"]
+            ))
+        if "showConsumption" in info:
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "show_consumption", "Consumption Visible", info["showConsumption"]
+            ))
+
         if "anlage" in info and isinstance(info["anlage"], dict) and "typ" in info["anlage"]:
-             entities.append(AustriaSmartMeterDiagnostic(coordinator, zp_num, "facility_type", "Facility Type", info["anlage"]["typ"]))
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "facility_type", "Facility Type", info["anlage"]["typ"]
+            ))
 
         if "verbrauchsstelle" in info and isinstance(info["verbrauchsstelle"], dict):
             addr = info["verbrauchsstelle"]
-            
-            full_addr = f"{addr.get('strasse', '')} {addr.get('hausnummer', '')}, {addr.get('postleitzahl', '')} {addr.get('ort', '')}"
-            entities.append(AustriaSmartMeterDiagnostic(coordinator, zp_num, "address", "Address", full_addr.strip()))
-            
+
+            full_addr = (
+                f"{addr.get('strasse', '')} {addr.get('hausnummer', '')}, "
+                f"{addr.get('postleitzahl', '')} {addr.get('ort', '')}"
+            )
+            entities.append(AustriaSmartMeterDiagnostic(
+                coordinator, zp_num, "address", "Address", full_addr.strip()
+            ))
+
             addr_fields = {
                 "strasse": "Street",
                 "hausnummer": "Street Number",
@@ -63,232 +122,244 @@ async def async_setup_entry(
                 "postleitzahl": "Postal Code",
                 "ort": "City",
                 "laengengrad": "Longitude",
-                "breitengrad": "Latitude"
+                "breitengrad": "Latitude",
             }
-            
             for key, label in addr_fields.items():
-                if key in addr and addr[key]:
-                     entities.append(AustriaSmartMeterDiagnostic(
-                         coordinator, 
-                         zp_num, 
-                         f"address_{key}", 
-                         f"Address {label}", 
-                         addr[key]
-                     ))
+                if addr.get(key):
+                    entities.append(AustriaSmartMeterDiagnostic(
+                        coordinator, zp_num, f"address_{key}", f"Address {label}", addr[key]
+                    ))
 
         # 3. Statistic Sensors (Consumption Yesterday, etc.)
-        if stats:
-            if "consumptionYesterday" in stats:
+        statistic_fields = {
+            "consumptionYesterday": "Consumption Yesterday",
+            "consumptionDayBeforeYesterday": "Consumption Day Before Yesterday",
+        }
+        for key, label in statistic_fields.items():
+            if key in stats:
                 entities.append(AustriaSmartMeterStatistic(
-                    coordinator, zp_num, stats["consumptionYesterday"], "Consumption Yesterday", "consumptionYesterday"
-                ))
-            if "consumptionDayBeforeYesterday" in stats:
-                entities.append(AustriaSmartMeterStatistic(
-                    coordinator, zp_num, stats["consumptionDayBeforeYesterday"], "Consumption Day Before Yesterday", "consumptionDayBeforeYesterday"
+                    coordinator, zp_num, stats[key], label, key
                 ))
 
     async_add_entities(entities)
 
 
-def _get_clean_meter_name(info):
-    """Returns a clean name without the AT... number."""
-    return info.get('zaehlpunktName') or "Smart Meter"
+def _get_clean_meter_name(info: dict[str, Any]) -> str:
+    """Return a clean meter name without the AT... number."""
+    return info.get("zaehlpunktName") or "Smart Meter"
 
 
-def _get_shared_device_info(zaehlpunkt, info, provider_id=None):
-    """Generates the device info dict shared by all entities of a meter."""
-    meter_name = _get_clean_meter_name(info)
-    
-    manufacturer = "Austria Smartmeter Integration"
-    conf_url = None
-    
-    if provider_id == PROVIDER_WIENER_NETZE:
-        manufacturer = "Wiener Netze"
-        conf_url = "https://smartmeter-web.wienernetze.at/"
-    elif provider_id == PROVIDER_NETZ_NOE:
-        manufacturer = "Netz Niederösterreich (EVN)"
-        conf_url = "https://smartmeter.netz-noe.at/"
-        
-    return {
-        "identifiers": {(DOMAIN, zaehlpunkt)},
-        "name": meter_name,
-        "manufacturer": manufacturer,
-        "model": f"Smart Meter {info.get('zaehlpunktAnlagentyp', '')}".strip(),
-        "serial_number": info.get("geraetNumber"),
-        "hw_version": str(info.get("equipmentNumber") or "Unknown"),
-        "configuration_url": conf_url
-    }
+def _get_shared_device_info(
+    zaehlpunkt: str, info: dict[str, Any], provider_id: str | None = None
+) -> DeviceInfo:
+    """Generate the device info dict shared by all entities of a meter."""
+    manufacturer, configuration_url = _provider_details(provider_id)
+
+    return DeviceInfo(
+        identifiers={(DOMAIN, zaehlpunkt)},
+        name=_get_clean_meter_name(info),
+        manufacturer=manufacturer,
+        model=f"Smart Meter {info.get('zaehlpunktAnlagentyp', '')}".strip(),
+        serial_number=info.get("geraetNumber"),
+        hw_version=str(info.get("equipmentNumber") or "Unknown"),
+        configuration_url=configuration_url,
+    )
 
 
-class AustriaSmartMeterSensor(CoordinatorEntity, SensorEntity):
+class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], SensorEntity):
     """Main Sensor (OBIS readings)."""
 
     def __init__(self, coordinator, zaehlpunkt, obis_data, info) -> None:
         super().__init__(coordinator)
         self._zaehlpunkt = zaehlpunkt
         self._obis_code = obis_data.get("obisCode")
-        
-        # Unit Handling
+
+        # Unit handling
         self._unit = obis_data.get("einheit")
-        
+
         # Init defaults
         self._attr_native_unit_of_measurement = None
         self._attr_device_class = None
         self._attr_state_class = None
 
-        readable_obis = OBIS_NAMES.get(self._obis_code, self._obis_code)
-        
-        # Check if this is a known Energy Meter OBIS Code
+        readable_obis = (
+            obis_data.get("name") or OBIS_NAMES.get(self._obis_code, self._obis_code)
+        )
+
+        # Check if this is a known Energy Meter OBIS code
         is_known_energy_obis = self._obis_code in OBIS_NAMES
-        
+
         # FORCE Energy Configuration with Wh
         if is_known_energy_obis or self._unit in ["kWh", "Wh"]:
             self._attr_device_class = SensorDeviceClass.ENERGY
-            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-            
-            # CHANGE: Set to Wh (Watt-hours)
+            self._attr_state_class = _state_class_for(obis_data)
+
+            # The portal values are normalised to Wh by the API clients.
             self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
-            
-            # If unit was missing, assume Wh
-            if not self._unit:
-                self._unit = "Wh"
-        
+
         # Naming
         meter_name = _get_clean_meter_name(info)
         self._attr_name = f"{meter_name} {readable_obis}"
         self._attr_unique_id = f"{zaehlpunkt}_{self._obis_code}"
-        
-        provider = PROVIDER_WIENER_NETZE if "WienerNetzeClient" in coordinator.client.__class__.__name__ else PROVIDER_NETZ_NOE
-        self._attr_device_info = _get_shared_device_info(zaehlpunkt, info, provider)
+        self._attr_device_info = _get_shared_device_info(
+            zaehlpunkt, info, coordinator.provider
+        )
 
     def _get_current_obis_data(self) -> dict | None:
+        """Return the reading block of this sensor's OBIS code."""
         all_readings = self.coordinator.data.get(self._zaehlpunkt, {}).get("readings", [])
-        if isinstance(all_readings, dict): all_readings = [all_readings]
-        for r in all_readings:
-            if r.get("obisCode") == self._obis_code:
-                return r
+        if isinstance(all_readings, dict):
+            all_readings = [all_readings]
+        for reading in all_readings:
+            if isinstance(reading, dict) and reading.get("obisCode") == self._obis_code:
+                return reading
         return None
 
     def _get_latest_reading(self, values: list) -> dict | None:
+        """Return the most recent entry of a reading list."""
         valid_values = []
-        for v in values:
-            ts = v.get("zeitBis") or v.get("zeitVon") or v.get("zeitpunkt") or v.get("date") or v.get("timestamp") or v.get("readAt")
-            if ts: valid_values.append((ts, v))
-        if not valid_values: return None
-        return sorted(valid_values, key=lambda x: x[0])[-1][1]
+        for value in values or []:
+            if not isinstance(value, dict):
+                continue
+            timestamp = (
+                value.get("zeitBis")
+                or value.get("zeitVon")
+                or value.get("zeitpunkt")
+                or value.get("date")
+                or value.get("timestamp")
+                or value.get("readAt")
+            )
+            if timestamp:
+                valid_values.append((timestamp, value))
+        if not valid_values:
+            return None
+        return sorted(valid_values, key=lambda item: item[0])[-1][1]
 
     @property
     def native_value(self) -> float | None:
+        """Return the latest value of this OBIS code."""
         data = self._get_current_obis_data()
-        if not data or "messwerte" not in data: return None
-        latest = self._get_latest_reading(data["messwerte"])
-        if not latest: return None
-        
-        val = latest.get("messwert") or latest.get("value") or latest.get("amount")
-        if val is None: return None
-
-        # CHANGE: Direct return without conversion for Wh
-        return float(val)
+        if not data:
+            return None
+        latest = self._get_latest_reading(data.get("messwerte"))
+        if not latest:
+            return None
+        for key in ("messwert", "value", "amount"):
+            if (result := _as_float(latest.get(key))) is not None:
+                return result
+        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Attributes for main sensor."""
+        """Return the attributes for the main sensor."""
         data = self._get_current_obis_data() or {}
-        attributes = {
+        attributes: dict[str, Any] = {
             "zaehlpunkt": self._zaehlpunkt,
             "obis_code": self._obis_code,
-            "raw_unit": data.get("einheit") or "Wh (assumed)"
+            "raw_unit": data.get("einheit") or "Wh (assumed)",
         }
-        
-        info = self.coordinator.data.get(self._zaehlpunkt, {}).get("info", {})
-        if info:
-            for key, value in info.items():
-                if isinstance(value, list): continue
-                if isinstance(value, dict):
-                    for sub_key, sub_value in value.items():
-                        if isinstance(sub_value, (str, int, float, bool)) or sub_value is None:
-                            attributes[f"{key}_{sub_key}"] = sub_value
-                else:
-                    attributes[key] = value
 
-        values = data.get("messwerte", [])
-        latest = self._get_latest_reading(values)
+        info = self.coordinator.data.get(self._zaehlpunkt, {}).get("info", {})
+        for key, value in info.items():
+            if isinstance(value, list):
+                continue
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    if isinstance(sub_value, (str, int, float, bool)) or sub_value is None:
+                        attributes[f"{key}_{sub_key}"] = sub_value
+            else:
+                attributes[key] = value
+
+        latest = self._get_latest_reading(data.get("messwerte"))
         if latest:
-             ts = latest.get("zeitBis") or latest.get("zeitVon") or latest.get("zeitpunkt") or latest.get("date")
-             attributes["last_reading_date"] = ts
-             attributes["validation_status"] = latest.get("qualitaet") or latest.get("status")
-             
-             for k, v in latest.items():
-                 if k not in ["messwert", "value", "amount", "qualitaet", "status", "validated"]:
-                      attributes[f"latest_{k}"] = v
+            attributes["last_reading_date"] = (
+                latest.get("zeitBis")
+                or latest.get("zeitVon")
+                or latest.get("zeitpunkt")
+                or latest.get("date")
+            )
+            attributes["validation_status"] = latest.get("qualitaet") or latest.get("status")
+
+            for key, value in latest.items():
+                if key not in ["messwert", "value", "amount", "qualitaet", "status", "validated"]:
+                    attributes[f"latest_{key}"] = value
         return attributes
 
 
-class AustriaSmartMeterDiagnostic(CoordinatorEntity, SensorEntity):
+class AustriaSmartMeterDiagnostic(
+    CoordinatorEntity[AustriaSmartMeterCoordinator], SensorEntity
+):
     """Diagnostic Sensor for static info."""
 
     def __init__(self, coordinator, zaehlpunkt, key, name_suffix, value) -> None:
         super().__init__(coordinator)
         self._zaehlpunkt = zaehlpunkt
-        self._key = key
-        self._value = value
-        
+
         info = coordinator.data.get(zaehlpunkt, {}).get("info", {})
-        
         meter_name = _get_clean_meter_name(info)
+
         self._attr_name = f"{meter_name} {name_suffix}"
-        
         self._attr_unique_id = f"{zaehlpunkt}_diag_{key}"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_native_value = str(value)
         self._attr_icon = "mdi:information-outline"
-        
-        provider = PROVIDER_WIENER_NETZE if "WienerNetzeClient" in coordinator.client.__class__.__name__ else PROVIDER_NETZ_NOE
-        self._attr_device_info = _get_shared_device_info(zaehlpunkt, info, provider)
+        self._attr_device_info = _get_shared_device_info(
+            zaehlpunkt, info, coordinator.provider
+        )
 
-class AustriaSmartMeterStatistic(CoordinatorEntity, SensorEntity):
+
+class AustriaSmartMeterStatistic(
+    CoordinatorEntity[AustriaSmartMeterCoordinator], SensorEntity
+):
     """Statistic Sensor for Daily Consumptions."""
 
     def __init__(self, coordinator, zaehlpunkt, stat_data, name_suffix, key_id) -> None:
         super().__init__(coordinator)
         self._zaehlpunkt = zaehlpunkt
         self._key_id = key_id
-        
+
         info = coordinator.data.get(zaehlpunkt, {}).get("info", {})
-        
         meter_name = _get_clean_meter_name(info)
+
         self._attr_name = f"{meter_name} {name_suffix}"
-        
         self._attr_unique_id = f"{zaehlpunkt}_stat_{key_id}"
-        
         self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_state_class = SensorStateClass.TOTAL
-        
-        # CHANGE: Set to Wh (Watt-hours)
+        # Daily values, not a cumulative meter reading.
+        self._attr_state_class = _PERIOD_STATE_CLASS
         self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
-        
-        provider = PROVIDER_WIENER_NETZE if "WienerNetzeClient" in coordinator.client.__class__.__name__ else PROVIDER_NETZ_NOE
-        self._attr_device_info = _get_shared_device_info(zaehlpunkt, info, provider)
+        self._attr_device_info = _get_shared_device_info(
+            zaehlpunkt, info, coordinator.provider
+        )
 
     @property
     def native_value(self) -> float | None:
+        """Return the consumption of the day."""
         stats = self.coordinator.data.get(self._zaehlpunkt, {}).get("stats", {})
-        if not stats: return None
-        data = stats.get(self._key_id)
-        if not data: return None
-        val = data.get("value")
-        if val is None: return None
-        
-        # CHANGE: Direct return without conversion for Wh
-        return float(val)
+        data = (stats or {}).get(self._key_id)
+        if not data:
+            return None
+        return _as_float(data.get("value"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the attributes of the statistic."""
         stats = self.coordinator.data.get(self._zaehlpunkt, {}).get("stats", {})
-        if not stats: return {}
-        data = stats.get(self._key_id)
-        if not data: return {}
+        data = (stats or {}).get(self._key_id)
+        if not data:
+            return {}
         return {
             "date": data.get("date"),
-            "validated": data.get("validated")
+            "validated": data.get("validated"),
         }
+
+
+def _state_class_for(obis_data: dict[str, Any]) -> SensorStateClass:
+    """Return the proper state class for a reading.
+
+    Consumption values of a period reset every day, they must not be reported as
+    total increasing meter readings.
+    """
+    value_type = str(obis_data.get("wertetyp") or "").upper()
+    if value_type in _PERIOD_VALUE_TYPES:
+        return _PERIOD_STATE_CLASS
+    return SensorStateClass.TOTAL_INCREASING
