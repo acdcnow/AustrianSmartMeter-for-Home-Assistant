@@ -29,6 +29,23 @@ This integration uses **Cloud Polling** to fetch data, meter readings, and "stat
     * Market Readiness (Communicative Status)
 * **Clean Naming:** Uses the friendly names assigned in the web portal instead of long ID numbers.
 
+## 📚 Documentation
+
+This repository documents **two lines of the integration at the same time** in its
+**[wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)**:
+
+| Document | What it covers |
+| :--- | :--- |
+| 🗄️ **[Design Documentation 1.1.8 (archived)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Archive-1.1.8-Design-Documentation)** | **The version you are running if you installed from `main`.** Architecture concept and software design of 1.1.8, preserved verbatim, with a list of its known defects. |
+| 🗄️ **[Extend the integration to support a new energy provider (archived)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Extend-the-Austria-Smartmeter-integration-to-support-a-new-energy-provider)** | The provider guide that matches this version. |
+| 🏠 **[Documentation home](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Home)** | Landing page: which document applies to which version. |
+| 🟢 **[Architecture Design Document](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Architecture-Design-Document)** · **[Software Design Document](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Software-Design-Document)** · **[Workflow Diagrams](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Workflow-Diagrams)** · **[Adding a New Provider](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Adding-a-New-Provider)** | The **development line 1.2.x** (branch `HA2026_09_dev`). Its repository map is generated with [GitDiagram](https://gitdiagram.com/acdcnow/austriansmartmeter-for-home-assistant). These documents do **not** describe the version on this branch. |
+
+> **This branch is the stable 1.1.8 line.** The 1.2.x line in development is a breaking
+> change: it requires Home Assistant **2026.9** or newer and is published as a
+> pre-release (`1.2.0-beta.1`) on the `HA2026_09_dev` branch. Stay on this branch if you
+> are running an older Home Assistant.
+
 ## 📥 Installation
 
 ### Option 1: Via HACS (Recommended)
