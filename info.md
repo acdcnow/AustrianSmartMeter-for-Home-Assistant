@@ -26,6 +26,13 @@ via their web portals.
 * **Brand images included:** the integration ships its own icon and logo, so it
   shows up properly in the Home Assistant UI.
 
+## 📚 Documentation
+
+Full design and developer documentation is in the
+**[project wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)**:
+Architecture Design Document, Software Design Document, workflow diagrams and a guide for
+adding new grid operators. The wiki also keeps the archived pre-2026.9 documentation.
+
 ## ⚠️ Important note
 
 This integration requires valid login credentials for your grid operator's web

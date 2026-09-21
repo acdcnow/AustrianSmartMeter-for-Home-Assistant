@@ -32,7 +32,25 @@ and statistics.
     * Contract status (active/inactive)
     * Market readiness (communicative status)
 * **Clean naming:** uses the friendly names assigned in the web portal instead of long ID numbers.
-* **Downloadable diagnostics:** *Settings → Devices & Services → Austria Smartmeter → Download diagnostics*.
+* **Downloads diagnostics:** *Settings → Devices & Services → Austria Smartmeter → Download diagnostics*.
+* **Brand images included:** the integration ships its own icon and logo, so it shows up properly in the Home Assistant UI.
+
+## 📚 Documentation
+
+The project documentation lives in the **[wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)**,
+which covers **two lines of the integration at the same time**:
+
+| Document | What it covers |
+| :--- | :--- |
+| 🏠 **[Documentation home](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)** | Landing page: which document applies to which version. |
+| 📐 **[Architecture Design Document (ADD)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Architecture-Design-Document)** | Requirements, system context, component decomposition, architectural decisions, risks, roadmap. Applies to **1.2.x**. |
+| 🧩 **[Software Design Document (SDD)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Software-Design-Document)** | Module inventory, interface contracts, component design, sequence diagrams, error handling matrix, release process. Applies to **1.2.x**. |
+| 🗺️ **[Workflow Diagrams](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Workflow-Diagrams)** | Repository map (generated with [GitDiagram](https://gitdiagram.com/acdcnow/austriansmartmeter-for-home-assistant)) plus setup, update, login and entity-creation workflows. |
+| 🛠️ **[Adding a New Provider](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Adding-a-New-Provider)** | Developer guide for adding a grid operator. |
+| 🗄️ **[Archived 1.1.8 documentation](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Archive-1.1.8-Design-Documentation)** | The pre-2026.9 design, kept for reference. |
+
+If you are still on **v1.1.8** (branch `main`), read the archived documents — they describe
+the design of the version you are running.
 
 ## 📥 Installation
 
@@ -143,6 +161,8 @@ contains the HTTP status code and a snippet of the response.
   `entry.runtime_data`, the config/options flow uses `ConfigFlowResult` and the
   read only `config_entry` property, and the manifest declares `integration_type`.
 * Added integration **brand images** (icon and logo, light and dark).
+* Added a **documentation wiki** with an Architecture Design Document, a Software Design
+  Document and workflow diagrams, and archived the pre-2026.9 design documentation.
 * Added **diagnostics** support.
 * Removed the `requests` and `python-dateutil` requirements, they are provided by
   Home Assistant Core.
