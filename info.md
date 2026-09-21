@@ -38,6 +38,15 @@ adding new grid operators. The wiki also keeps the archived pre-2026.9 documenta
 This integration requires valid login credentials for your grid operator's web
 portal (e.g. the [Wiener Netze Smart Meter Portal](https://smartmeter-web.wienernetze.at/)).
 
+## 📚 Documentation
+
+Full documentation — the **Architecture Design Document (ADD)**, the **Software Design
+Document (SDD)**, the workflow diagrams (repository map generated with GitDiagram) and
+the provider guide — lives in the
+[project wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki).
+The wiki documents the current **1.2.x** line and keeps the **archived 1.1.8** design
+for users still on that release.
+
 ## Installation
 
 1. Install via HACS by adding this repository as a **custom repository**.
