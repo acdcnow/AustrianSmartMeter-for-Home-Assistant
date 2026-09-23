@@ -16,9 +16,29 @@ and statistics.
 | :--- | :--- | :--- |
 | **Wiener Netze** | ✅ Supported | Smart Meter Web Portal account required |
 | **Netz Niederösterreich (EVN)** | ✅ Supported | Smart Meter Web Portal account required |
+| **energiedaten.at** | ✅ Supported | Not a grid operator: an Austrian smart meter data platform. API key required (see below) |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
+
+### energiedaten.at (API platform)
+
+[energiedaten.at](https://energiedaten.at/) collects smart meter data from the Austrian
+grid operators and republishes it through a REST API. It is therefore configured
+differently from the portals above:
+
+1. Create an API key in the energiedaten.at dashboard under **Integrations → API Keys**
+   with the scopes `smart-meters:read` and `data:read`. The key is shown once.
+2. Add the metering point there (**Smart Meters**) and request its consent. Data starts
+   flowing the day after the grid operator accepts; the meter is ready when its status is
+   `connected`.
+3. In Home Assistant, add the integration, select **energiedaten.at (API key)** and paste
+   the key.
+
+The integration is read-only for this provider: it never creates locations, meters or
+consents. The platform publishes 15-minute interval readings, which are summed up per
+local day and reported as daily consumption/feed-in in Wh (the API exposes no cumulative
+meter register).
 
 ## ✨ Features
 
@@ -80,6 +100,7 @@ Since this is a custom integration, add it as a **custom repository**:
 3. Search for **"Austria Smartmeter"**.
 4. Select your grid operator (e.g. Wiener Netze).
 5. Enter your **username** (usually email) and **password** for the operator's web portal.
+   For **energiedaten.at (API key)** enter the **API key** instead.
 6. Upon successful login, your meters will be added automatically.
 
 ### Options

@@ -15,7 +15,13 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, OBIS_NAMES, PROVIDER_NETZ_NOE, PROVIDER_WIENER_NETZE
+from .const import (
+    DOMAIN,
+    OBIS_NAMES,
+    PROVIDER_ENERGIEDATEN,
+    PROVIDER_NETZ_NOE,
+    PROVIDER_WIENER_NETZE,
+)
 from .coordinator import AustriaSmartMeterCoordinator
 
 # Readings that describe the consumption of a period (and therefore reset every
@@ -28,6 +34,7 @@ _PERIOD_STATE_CLASS = SensorStateClass.TOTAL
 _PROVIDER_PORTALS = {
     PROVIDER_WIENER_NETZE: ("Wiener Netze", "https://smartmeter-web.wienernetze.at/"),
     PROVIDER_NETZ_NOE: ("Netz Niederösterreich (EVN)", "https://smartmeter.netz-noe.at/"),
+    PROVIDER_ENERGIEDATEN: ("energiedaten.at", "https://energiedaten.at/"),
 }
 
 

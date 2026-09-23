@@ -12,6 +12,7 @@
         "title": "Anmeldung",
         "description": "Bitte geben Sie Ihre Zugangsdaten für **{provider_name}** ein.",
         "data": {
+          "api_key": "API-Schlüssel",
           "username": "Benutzername (E-Mail)",
           "password": "Passwort"
         }
@@ -19,7 +20,7 @@
     },
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen. Bitte prüfen Sie Ihre Internetverbindung.",
-      "invalid_auth": "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Benutzername und Passwort.",
+      "invalid_auth": "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Zugangsdaten.",
       "no_contracts": "Keine Zählpunkte in diesem Konto gefunden.",
       "unknown": "Unerwarteter Fehler."
     },

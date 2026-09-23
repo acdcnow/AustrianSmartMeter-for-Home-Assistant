@@ -11,14 +11,20 @@ LOGGER = logging.getLogger(__package__)
 # Configuration
 CONF_PROVIDER = "provider"
 
+# Credential of providers that authenticate with an API key (energiedaten.at)
+# instead of a portal login.
+CONF_API_KEY = "api_key"
+
 # Providers
 PROVIDER_WIENER_NETZE = "wiener_netze"
 PROVIDER_NETZ_NOE = "netz_noe"
+PROVIDER_ENERGIEDATEN = "energiedaten_at"
 PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 
 PROVIDERS = {
     PROVIDER_WIENER_NETZE: "Wiener Netze",
     PROVIDER_NETZ_NOE: "Netz Niederösterreich (EVN)",
+    PROVIDER_ENERGIEDATEN: "energiedaten.at (API key)",
     # PROVIDER_STROMNETZ_GRAZ: "Stromnetz Graz", # In Entwicklung
 }
 
@@ -44,6 +50,7 @@ __all__ = [
     "ATTR_OBIS_CODE",
     "ATTR_UNIT",
     "ATTR_ZAEHLPUNKT",
+    "CONF_API_KEY",
     "CONF_PASSWORD",
     "CONF_PROVIDER",
     "CONF_SCAN_INTERVAL",
@@ -54,6 +61,7 @@ __all__ = [
     "MIN_SCAN_INTERVAL",
     "OBIS_NAMES",
     "PROVIDERS",
+    "PROVIDER_ENERGIEDATEN",
     "PROVIDER_NETZ_NOE",
     "PROVIDER_STROMNETZ_GRAZ",
     "PROVIDER_WIENER_NETZE",

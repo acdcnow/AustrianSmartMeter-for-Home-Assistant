@@ -10,6 +10,7 @@ via their web portals.
 
 * ✅ **Wiener Netze**
 * ✅ **Netz Niederösterreich (EVN)**
+* ✅ **energiedaten.at** (API key, not a grid operator)
 * 🚧 **Stromnetz Graz** (planned)
 
 **Requires Home Assistant 2026.9 or newer.**
@@ -37,6 +38,11 @@ adding new grid operators. The wiki also keeps the archived pre-2026.9 documenta
 
 This integration requires valid login credentials for your grid operator's web
 portal (e.g. the [Wiener Netze Smart Meter Portal](https://smartmeter-web.wienernetze.at/)).
+
+**energiedaten.at** is a data platform rather than a grid operator and is configured
+with an **API key** (*Integrations → API Keys* in its dashboard, scopes
+`smart-meters:read` and `data:read`) instead of a portal login. The metering point has
+to be added and consented there first — the integration only reads data.
 
 ## 📚 Documentation
 

@@ -12,6 +12,7 @@
         "title": "Authentication",
         "description": "Please enter your credentials for **{provider_name}**.",
         "data": {
+          "api_key": "API Key",
           "username": "Username (Email)",
           "password": "Password"
         }
@@ -19,7 +20,7 @@
     },
     "error": {
       "cannot_connect": "Connection failed. Please check your internet connection.",
-      "invalid_auth": "Authentication failed. Please check your username and password.",
+      "invalid_auth": "Authentication failed. Please check your credentials.",
       "no_contracts": "No metering points (contracts) found in this account.",
       "unknown": "Unexpected error."
     },
