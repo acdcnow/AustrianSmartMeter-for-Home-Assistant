@@ -2,10 +2,11 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Maintainer](https://img.shields.io/badge/maintainer-acdcnow-blue)](https://github.com/acdcnow)
-[![Version](https://img.shields.io/badge/version-1.2.0--beta.1-green)]()
+[![Version](https://img.shields.io/badge/version-1.2.0-green)]()
 
-A custom component for Home Assistant that retrieves energy data from Austrian
-grid operators (Smart Meter) through their web portals.
+A custom component for Home Assistant that retrieves energy data for Austrian smart
+meters: from the grid operators' web portals, from the local meter interfaces, and from
+the data platforms and price feeds around them.
 
 The integration uses **cloud polling** to fetch meter readings, consumption data
 and statistics.
@@ -60,6 +61,9 @@ The integration is read-only for this provider: it never creates locations, mete
 consents. The platform publishes 15-minute interval readings, which are summed up per
 local day and reported as daily consumption/feed-in in Wh (the API exposes no cumulative
 meter register).
+
+> The adapter follows the platform's documented API and was verified with fixtures, not
+> against a live account.
 
 ### DSMR / P1 customer interface (local)
 
@@ -199,30 +203,14 @@ which covers **two lines of the integration at the same time**:
 | 📐 **[Architecture Design Document (ADD)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Architecture-Design-Document)** | Requirements, system context, component decomposition, architectural decisions, risks, roadmap. Applies to **1.2.x**. |
 | 🧩 **[Software Design Document (SDD)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Software-Design-Document)** | Module inventory, interface contracts, component design, sequence diagrams, error handling matrix, release process. Applies to **1.2.x**. |
 | 🗺️ **[Workflow Diagrams](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Workflow-Diagrams)** | Repository map (generated with [GitDiagram](https://gitdiagram.com/acdcnow/austriansmartmeter-for-home-assistant)) plus setup, update, login and entity-creation workflows. |
-| 🛠️ **[Adding a New Provider](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Adding-a-New-Provider)** | Developer guide for adding a grid operator. |
+| 🛠️ **[Adding a New Provider](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Adding-a-New-Provider)** | Developer guide for adding a provider. |
 | 🗄️ **[Archived 1.1.8 documentation](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Archive-1.1.8-Design-Documentation)** | The pre-2026.9 design, kept for reference. |
 
-If you are still on **v1.1.8** (branch `main`), read the archived documents — they describe
-the design of the version you are running.
+The documents describe the **1.2.x line**, which is what this release belongs to. They
+require Home Assistant **2026.9** or newer. If you are still running **1.1.8** (an older
+Home Assistant), install it from the `1.1.8` tag and read the archived documentation.
 
-## 📚 Documentation
-
-This repository documents **two lines of the integration at the same time** in its
-**[wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)**:
-
-| Document | What it covers |
-| :--- | :--- |
-| 🗄️ **[Design Documentation 1.1.8 (archived)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Archive-1.1.8-Design-Documentation)** | **The version you are running if you installed from `main`.** Architecture concept and software design of 1.1.8, preserved verbatim, with a list of its known defects. |
-| 🗄️ **[Extend the integration to support a new energy provider (archived)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Extend-the-Austria-Smartmeter-integration-to-support-a-new-energy-provider)** | The provider guide that matches this version. |
-| 🏠 **[Documentation home](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Home)** | Landing page: which document applies to which version. |
-| 🟢 **[Architecture Design Document](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Architecture-Design-Document)** · **[Software Design Document](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Software-Design-Document)** · **[Workflow Diagrams](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Workflow-Diagrams)** · **[Adding a New Provider](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Adding-a-New-Provider)** | The **development line 1.2.x** (branch `HA2026_09_dev`). Its repository map is generated with [GitDiagram](https://gitdiagram.com/acdcnow/austriansmartmeter-for-home-assistant). These documents do **not** describe the version on this branch. |
-
-> **This branch is the stable 1.1.8 line.** The 1.2.x line in development is a breaking
-> change: it requires Home Assistant **2026.9** or newer and is published as a
-> pre-release (`1.2.0-beta.1`) on the `HA2026_09_dev` branch. Stay on this branch if you
-> are running an older Home Assistant.
-
-## 📥 Installation
+##  Installation
 
 ### Option 1: Via HACS (recommended)
 
@@ -323,6 +311,35 @@ something that was not JSON (for example an HTML error page). The debug log
 contains the HTTP status code and a snippet of the response.
 
 ## 📝 Changelog
+
+### 1.2.0
+
+The first stable 1.2.x release. On top of the 1.2.0-beta.1 foundation (Home Assistant
+2026.9 compatibility, the repaired Netz Niederösterreich login, brand images) it adds
+**six providers** to one integration:
+
+* **energiedaten.at** - an API platform that republishes Austrian smart meter data.
+  Configured with an API key; its 15-minute interval readings are summed up per local
+  day.
+* **energyLIVE (smartENERGY)** - meter reader hardware with an API key, reporting
+  cumulative meter readings (`1.8.0`/`2.8.0`) and the current power in W.
+* **DSMR / P1 customer interface** - the meter's own interface, read over a serial cable
+  or a network P1 reader, encrypted meters included (twelve DSMR dialects, among them the
+  Austrian *Sagemcom T210-D-R*).
+* **aWATTar market prices** - the public EPEX day-ahead feed of Austria and Germany in
+  `ct/kWh`, which is what makes load shifting automatable. No account required.
+* **Selectra tariff planning** - the tariff a household actually pays, with its time
+  bands and its feed-in price. Commercial API with a personal token and a free tier of
+  60 calls per month, which the adapter spends carefully.
+* **Salzburg Netz** - the grid operator's own POST-only interface with 15-minute load
+  profiles, read with an API key from the service portal plus the customer number. One
+  request per metering point per day.
+
+The providers that are not grid operators (energyLIVE, energiedaten.at, aWATTar,
+Selectra) and the APIs that could not be checked against a live service (energiedaten.at,
+Selectra, Salzburg Netz) say so in their section above.
+
+**Requirements:** Home Assistant **2026.9** or newer.
 
 ### 1.2.0-beta.1
 

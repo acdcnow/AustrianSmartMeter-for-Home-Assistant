@@ -1,6 +1,6 @@
 # Austria Smartmeter Integration for Home Assistant
 
-![Version](https://img.shields.io/badge/version-1.2.0--beta.1-green)
+![Version](https://img.shields.io/badge/version-1.2.0-green)
 [![Maintainer](https://img.shields.io/badge/maintainer-acdcnow-blue)](https://github.com/acdcnow)
 
 Retrieve energy data from Austrian grid operators directly into Home Assistant
