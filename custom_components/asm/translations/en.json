@@ -17,14 +17,22 @@
           "dsmr_version": "DSMR version",
           "encryption_key": "Decryption key (encrypted meters only)",
           "market_area": "Market area",
+          "token": "Selectra API token (bearer)",
+          "country_code": "Country code (e.g. at)",
+          "postcode": "Postcode",
           "username": "Username (Email)",
           "password": "Password"
         }
+      },
+      "qualification": {
+        "title": "Selectra: qualify the tariff",
+        "description": "Selectra identifies the tariff in a questionnaire, and every answer costs one call of the monthly quota. Questions of the type `json` expect a JSON document.\n\n{question_list}"
       }
     },
     "error": {
       "cannot_connect": "Connection failed. Please check your internet connection.",
       "invalid_auth": "Authentication failed. Please check your credentials.",
+      "invalid_input": "The value is invalid.",
       "no_contracts": "No metering points (contracts) found in this account.",
       "unknown": "Unexpected error."
     },

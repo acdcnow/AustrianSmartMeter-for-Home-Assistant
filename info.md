@@ -13,6 +13,7 @@ via their web portals.
 * ✅ **energyLIVE** (smartENERGY, API key)
 * ✅ **DSMR / P1 customer interface** (local serial cable or network P1 reader, no account)
 * ✅ **aWATTar market prices** (public EPEX price feed, no account)
+* ✅ **Selectra tariff planning** (third-party tariff API, personal token, 60 calls/month free)
 * 🚧 **Stromnetz Graz** (planned)
 
 **Requires Home Assistant 2026.9 or newer.**
@@ -44,6 +45,10 @@ portal (e.g. the [Wiener Netze Smart Meter Portal](https://smartmeter-web.wiener
 **energyLIVE** is meter reader hardware rather than a grid operator and is configured with
 an **API key** from the smartENERGY app or customer portal instead of a portal login. It
 reports cumulative meter readings (Wh) and the current power (W).
+
+**aWATTar market prices** and **Selectra tariff planning** read no meter at all: they add a
+price sensor so that load shifting can be automated. aWATTar is a public feed, Selectra is a
+commercial third-party API with a personal token and a free tier of 60 calls per month.
 
 ## 📚 Documentation
 

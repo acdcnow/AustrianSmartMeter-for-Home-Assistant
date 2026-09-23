@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
     OBIS_NAMES,
     PROVIDER_AWATTAR,
+    PROVIDER_SELECTRA,
     PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
     PROVIDER_NETZ_NOE,
@@ -43,6 +44,7 @@ _PROVIDER_PORTALS = {
     PROVIDER_ENERGYLIVE: ("smartENERGY", "https://www.smartenergy.at/energylive"),
     PROVIDER_DSMR: ("DSMR / P1 meter", None),
     PROVIDER_AWATTAR: ("aWATTar", "https://www.awattar.at/services/api"),
+    PROVIDER_SELECTRA: ("Selectra", "https://selectra.at/api-planung"),
 }
 
 

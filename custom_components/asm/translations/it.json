@@ -17,14 +17,22 @@
           "dsmr_version": "Versione DSMR",
           "encryption_key": "Chiave di decrittazione (solo contatori cifrati)",
           "market_area": "Zona di mercato",
+          "token": "Token API Selectra (Bearer)",
+          "country_code": "Codice paese (es. at)",
+          "postcode": "Codice postale",
           "username": "Nome utente (Email)",
           "password": "Password"
         }
+      },
+      "qualification": {
+        "title": "Selectra: determinare la tariffa",
+        "description": "Selectra identifica la tariffa tramite un questionario e ogni risposta costa una chiamata della quota mensile. Le domande di tipo `json` richiedono un documento JSON.\n\n{question_list}"
       }
     },
     "error": {
       "cannot_connect": "Connessione fallita. Controlla la tua connessione internet.",
       "invalid_auth": "Autenticazione fallita. Controlla le tue credenziali.",
+      "invalid_input": "Il valore non è valido.",
       "no_contracts": "Nessun punto di misurazione trovato in questo account.",
       "unknown": "Errore imprevisto."
     },

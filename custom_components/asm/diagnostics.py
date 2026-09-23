@@ -7,9 +7,21 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_API_KEY, CONF_ENCRYPTION_KEY, CONF_PASSWORD, CONF_USERNAME
+from .const import (
+    CONF_API_KEY,
+    CONF_ENCRYPTION_KEY,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+    CONF_USERNAME,
+)
 
-TO_REDACT = {CONF_API_KEY, CONF_ENCRYPTION_KEY, CONF_PASSWORD, CONF_USERNAME}
+TO_REDACT = {
+    CONF_API_KEY,
+    CONF_ENCRYPTION_KEY,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+    CONF_USERNAME,
+}
 
 
 async def async_get_config_entry_diagnostics(

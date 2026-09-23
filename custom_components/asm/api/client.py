@@ -6,6 +6,7 @@ from .base import SmartmeterClient
 from .client_awattar import AwattarClient
 from .client_energylive import EnergyliveClient
 from .client_noe import NetzNoeClient
+from .client_selectra import SelectraClient
 from .client_wn import WienerNetzeClient
 from ..const import (
     CONF_API_KEY,
@@ -14,11 +15,15 @@ from ..const import (
     CONF_MARKET_AREA,
     CONF_PASSWORD,
     CONF_PORT,
+    CONF_SELECTRA_INPUTS,
+    CONF_SELECTRA_LABEL,
+    CONF_TOKEN,
     CONF_USERNAME,
     PROVIDER_AWATTAR,
     PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
     PROVIDER_NETZ_NOE,
+    PROVIDER_SELECTRA,
     PROVIDER_WIENER_NETZE,
 )
 
@@ -44,6 +49,13 @@ def get_client(
 
     if provider == PROVIDER_AWATTAR:
         return AwattarClient(data.get(CONF_MARKET_AREA))
+
+    if provider == PROVIDER_SELECTRA:
+        return SelectraClient(
+            data.get(CONF_TOKEN),
+            data.get(CONF_SELECTRA_INPUTS),
+            data.get(CONF_SELECTRA_LABEL),
+        )
 
     if provider == PROVIDER_DSMR:
         # Imported on demand: this provider needs dsmr-parser and serialx, and a

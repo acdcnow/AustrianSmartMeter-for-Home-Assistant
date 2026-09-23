@@ -17,14 +17,22 @@
           "dsmr_version": "Version DSMR",
           "encryption_key": "Clé de déchiffrement (compteurs chiffrés uniquement)",
           "market_area": "Zone de marché",
+          "token": "Jeton d'API Selectra (Bearer)",
+          "country_code": "Code pays (p. ex. at)",
+          "postcode": "Code postal",
           "username": "Nom d'utilisateur (E-mail)",
           "password": "Mot de passe"
         }
+      },
+      "qualification": {
+        "title": "Selectra : déterminer le tarif",
+        "description": "Selectra identifie le tarif via un questionnaire, et chaque réponse coûte un appel du quota mensuel. Les questions de type `json` attendent un document JSON.\n\n{question_list}"
       }
     },
     "error": {
       "cannot_connect": "Échec de la connexion. Veuillez vérifier votre connexion Internet.",
       "invalid_auth": "Authentification échouée. Veuillez vérifier vos identifiants.",
+      "invalid_input": "La valeur est invalide.",
       "no_contracts": "Aucun point de comptage trouvé dans ce compte.",
       "unknown": "Erreur inattendue."
     },

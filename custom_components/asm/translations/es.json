@@ -17,14 +17,22 @@
           "dsmr_version": "Versión DSMR",
           "encryption_key": "Clave de descifrado (solo contadores cifrados)",
           "market_area": "Zona de mercado",
+          "token": "Token de API de Selectra (Bearer)",
+          "country_code": "Código de país (p. ej. at)",
+          "postcode": "Código postal",
           "username": "Nombre de usuario (Email)",
           "password": "Contraseña"
         }
+      },
+      "qualification": {
+        "title": "Selectra: determinar la tarifa",
+        "description": "Selectra identifica la tarifa mediante un cuestionario, y cada respuesta consume una llamada de la cuota mensual. Las preguntas del tipo `json` esperan un documento JSON.\n\n{question_list}"
       }
     },
     "error": {
       "cannot_connect": "Conexión fallida. Por favor, compruebe su conexión a internet.",
       "invalid_auth": "Autenticación fallida. Por favor, compruebe sus credenciales.",
+      "invalid_input": "El valor no es válido.",
       "no_contracts": "No se encontraron puntos de suministro en esta cuenta.",
       "unknown": "Error inesperado."
     },

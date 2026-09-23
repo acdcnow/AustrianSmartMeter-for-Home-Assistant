@@ -19,6 +19,7 @@ and statistics.
 | **energyLIVE (smartENERGY)** | ✅ Supported | Meter reader hardware, not a grid operator. API key required (see below) |
 | **DSMR / P1 customer interface** | ✅ Supported | Local serial cable or network P1 reader. No account required |
 | **aWATTar market prices** | ✅ Supported | Price feed (EPEX day-ahead), not meter data. No account required |
+| **Selectra tariff planning** | ✅ Supported | Third-party tariff API, personal token required. Free tier: 60 calls/month |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
@@ -76,6 +77,41 @@ unchanged, because they are the interesting ones.
 > This provider reads no meter. It is included because the hourly price is what makes
 > load shifting (heat pump, wallbox, battery) automatable. aWATTar asks for fair use of
 > 100 requests per day; one request per scan interval uses 24 of them.
+
+### Selectra tariff planning
+
+[Selectra](https://selectra.at/api-planung) publishes the *Electricity Planning API*: it
+qualifies a household's actual tariff — provider, offer, option, network area — and returns
+the priced time bands of exactly that contract: high/low tariff, night hours, dynamic
+prices, plus the feed-in price of a PV contract.
+
+1. Create a token at [api.selectra.com](https://api.selectra.com), then add the
+   integration and select **Selectra tariff planning**.
+2. Paste the **token**, your **country code** (`at`) and your **postcode**.
+3. Answer the questionnaire the API returns (which provider, which offer, which option …)
+   until it reports itself satisfied. The qualified offer is stored with the entry.
+
+The integration then adds a **Tariff Price** sensor in `ct/kWh` for the band that is
+running now, with the other bands as attributes: the next band, the cheapest upcoming band
+(and when it starts), the min/max/average still ahead, the feed-in price and the moment the
+plan will be updated next.
+
+> **This is a commercial third-party API, not a grid operator.** Every call needs a
+> personal bearer token and calls are metered:
+>
+> * **Free tier: 60 calls per calendar month** (all markets, all endpoints, no credit card).
+>   Qualifying a new entry costs a few calls, one price plan costs one.
+> * Paid plans start at 1 €/month per market; **Austria is 200 €/month** with per-request
+>   tiers above 10 000 calls.
+>
+> The integration spends as few calls as possible: a price plan carries a `next_update`
+> timestamp and is cached until then, so a household uses one or two calls per day no matter
+> how short the scan interval is. When the monthly quota is exhausted, the last plan keeps
+> being served and its reading is flagged `plan_expired` instead of failing every poll.
+>
+> The adapter was written against the public OpenAPI document (**Electricity Planning API
+> 1.0.0**), because every call is token gated: it is **not verified against the live
+> service**. Prices, the questionnaire and the error mapping follow the published schema.
 
 ## ✨ Features
 
@@ -139,7 +175,8 @@ Since this is a custom integration, add it as a **custom repository**:
 5. Enter your **username** (usually email) and **password** for the operator's web portal.
    For **energyLIVE (smartENERGY)** enter the **API key** instead, for
    **DSMR / P1 meter (local)** the port your meter's customer interface is connected to,
-   and for **aWATTar market prices** the market area.
+   for **aWATTar market prices** the market area, and for **Selectra tariff planning**
+   your API token, country code and postcode (followed by its questionnaire).
 6. Upon successful login, your meters will be added automatically.
 
 ### Options

@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.const import CONF_API_KEY, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
+from homeassistant.const import (
+    CONF_API_KEY,
+    CONF_COUNTRY_CODE,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_TOKEN,
+    CONF_USERNAME,
+)
 
 DOMAIN = "asm"
 LOGGER = logging.getLogger(__package__)
@@ -20,12 +27,20 @@ CONF_ENCRYPTION_KEY = "encryption_key"
 # The aWATTar market feed is selected by market area, not by a credential.
 CONF_MARKET_AREA = "market_area"
 
+# Selectra is a paid third-party tariff planning API. Every user brings a personal
+# bearer token (CONF_TOKEN), and the offer the questionnaire qualified is stored
+# with the entry, because re-qualifying would cost calls of the monthly quota.
+CONF_POSTCODE = "postcode"
+CONF_SELECTRA_INPUTS = "inputs"
+CONF_SELECTRA_LABEL = "offer_label"
+
 # Providers
 PROVIDER_WIENER_NETZE = "wiener_netze"
 PROVIDER_NETZ_NOE = "netz_noe"
 PROVIDER_ENERGYLIVE = "energylive"
 PROVIDER_DSMR = "dsmr"
 PROVIDER_AWATTAR = "awattar"
+PROVIDER_SELECTRA = "selectra"
 PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 
 PROVIDERS = {
@@ -34,6 +49,7 @@ PROVIDERS = {
     PROVIDER_ENERGYLIVE: "energyLIVE (smartENERGY)",
     PROVIDER_DSMR: "DSMR / P1 meter (local)",
     PROVIDER_AWATTAR: "aWATTar market prices",
+    PROVIDER_SELECTRA: "Selectra tariff planning",
     # PROVIDER_STROMNETZ_GRAZ: "Stromnetz Graz", # In Entwicklung
 }
 
@@ -60,12 +76,17 @@ __all__ = [
     "ATTR_UNIT",
     "ATTR_ZAEHLPUNKT",
     "CONF_API_KEY",
+    "CONF_COUNTRY_CODE",
     "CONF_DSMR_VERSION",
     "CONF_ENCRYPTION_KEY",
     "CONF_MARKET_AREA",
     "CONF_PASSWORD",
+    "CONF_POSTCODE",
     "CONF_PROVIDER",
     "CONF_SCAN_INTERVAL",
+    "CONF_SELECTRA_INPUTS",
+    "CONF_SELECTRA_LABEL",
+    "CONF_TOKEN",
     "CONF_USERNAME",
     "DEFAULT_SCAN_INTERVAL",
     "DOMAIN",
@@ -77,6 +98,7 @@ __all__ = [
     "PROVIDER_DSMR",
     "PROVIDER_ENERGYLIVE",
     "PROVIDER_NETZ_NOE",
+    "PROVIDER_SELECTRA",
     "PROVIDER_STROMNETZ_GRAZ",
     "PROVIDER_WIENER_NETZE",
 ]

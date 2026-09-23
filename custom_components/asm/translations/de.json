@@ -17,14 +17,22 @@
           "dsmr_version": "DSMR-Version",
           "encryption_key": "Entschlüsselungsschlüssel (nur verschlüsselte Zähler)",
           "market_area": "Marktgebiet",
+          "token": "Selectra API-Token (Bearer)",
+          "country_code": "Ländercode (z. B. at)",
+          "postcode": "Postleitzahl",
           "username": "Benutzername (E-Mail)",
           "password": "Passwort"
         }
+      },
+      "qualification": {
+        "title": "Selectra: Tarif bestimmen",
+        "description": "Selectra identifiziert den Tarif über einen Fragebogen, wobei jede Antwort einen Aufruf des Monatskontingents kostet. Fragen des Typs `json` erwarten ein JSON-Dokument.\n\n{question_list}"
       }
     },
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen. Bitte prüfen Sie Ihre Internetverbindung.",
       "invalid_auth": "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Zugangsdaten.",
+      "invalid_input": "Der Wert ist ungültig.",
       "no_contracts": "Keine Zählpunkte in diesem Konto gefunden.",
       "unknown": "Unerwarteter Fehler."
     },
