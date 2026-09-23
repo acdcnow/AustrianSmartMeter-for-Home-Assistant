@@ -2,11 +2,13 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Maintainer](https://img.shields.io/badge/maintainer-acdcnow-blue)](https://github.com/acdcnow)
-[![Version](https://img.shields.io/badge/version-1.1.7-green)]()
+[![Version](https://img.shields.io/badge/version-1.2.0--beta.1-green)]()
 
-A custom component for Home Assistant to retrieve energy data from Austrian grid operators (Smart Meter) via their web portals.
+A custom component for Home Assistant that retrieves energy data from Austrian
+grid operators (Smart Meter) through their web portals.
 
-This integration uses **Cloud Polling** to fetch data, meter readings, and "statistics".
+The integration uses **cloud polling** to fetch meter readings, consumption data
+and statistics.
 
 ## ⚡ Supported Grid Operators
 
@@ -14,20 +16,174 @@ This integration uses **Cloud Polling** to fetch data, meter readings, and "stat
 | :--- | :--- | :--- |
 | **Wiener Netze** | ✅ Supported | Smart Meter Web Portal account required |
 | **Netz Niederösterreich (EVN)** | ✅ Supported | Smart Meter Web Portal account required |
+| **energyLIVE (smartENERGY)** | ✅ Supported | Meter reader hardware, not a grid operator. API key required (see below) |
+| **DSMR / P1 customer interface** | ✅ Supported | Local serial cable or network P1 reader. No account required |
+| **aWATTar market prices** | ✅ Supported | Price feed (EPEX day-ahead), not meter data. No account required |
+| **Selectra tariff planning** | ✅ Supported | Third-party tariff API, personal token required. Free tier: 60 calls/month |
+| **Salzburg Netz** | ✅ Supported | API key from the service portal + customer number. 15-minute load profiles |
 | **Stromnetz Graz** | 🚧 Planned | In development |
+
+> **Requirements:** Home Assistant **2026.9** or newer.
+
+### energyLIVE (smartENERGY)
+
+[energyLIVE](https://www.smartenergy.at/energylive) reads the smart meter through a small
+*interface* (optionally paired with a *gateway* that forwards the data over LoRa), so it
+is neither a grid operator nor a portal login:
+
+1. Get an API key in the smartENERGY app or customer portal (**API Key verwalten**).
+   Being a smartENERGY customer is not required.
+2. In Home Assistant, add the integration, select **energyLIVE (smartENERGY)** and paste
+   the key. The paired devices are found automatically.
+
+The devices report genuine cumulative meter readings — consumption (`1.8.0`) and feed-in
+(`2.8.0`) in Wh — which is exactly what the integration's total-increasing sensors expect,
+plus the current power in W. The API has no history and no daily statistics, and the
+values are only as fresh as the configured scan interval (see *Options* below).
+
+### DSMR / P1 customer interface (local)
+
+A meter's customer interface can also be read directly. It is a physical port ("H1",
+6-pin RJ12) that pushes a DSMR telegram every 10 seconds, so all that is needed is the
+connection to it:
+
+1. Add the integration and select **DSMR / P1 meter (local)**.
+2. Enter the **port**: `/dev/ttyUSB0`, a `/dev/serial/by-id/…` path, or
+   `socket://<host>:<port>` for a P1 reader on your network.
+3. Pick the **DSMR version** (the Austrian *Sagemcom T210-D-R* is listed by name) and, for
+   an encrypted meter, paste the **decryption key** your grid operator provided.
+
+The integration reads one telegram per scan interval and reports the cumulative registers
+(`1.8.0` consumption / `2.8.0` feed-in in Wh) plus the current power (`1.7.0`/`2.7.0` in W).
+Gas and water values that a telegram carries over M-Bus are not exposed.
+
+> **Note:** Home Assistant's own [DSMR integration](https://www.home-assistant.io/integrations/dsmr)
+> reads the very same interface with push updates (every 10 seconds). Use it if you want
+> real-time data; this integration polls, with a minimum interval of 60 minutes.
+
+### aWATTar market prices
+
+[aWATTar](https://www.awattar.at/services/api) publishes the EPEX Spot day-ahead prices of
+the Austrian and German market over a public API — no account, no token:
+
+1. Add the integration and select **aWATTar market prices**.
+2. Pick the **market area** (Austria or Germany).
+
+The integration then adds a **Market Price** sensor in `ct/kWh` for the hour that is
+currently running, with the rest of the horizon as attributes: the next hour's price, the
+cheapest upcoming hour (and when it starts), the min/max/average of everything still
+ahead, and the price exactly as the API delivered it. Negative prices are passed through
+unchanged, because they are the interesting ones.
+
+> This provider reads no meter. It is included because the hourly price is what makes
+> load shifting (heat pump, wallbox, battery) automatable. aWATTar asks for fair use of
+> 100 requests per day; one request per scan interval uses 24 of them.
+
+### Selectra tariff planning
+
+[Selectra](https://selectra.at/api-planung) publishes the *Electricity Planning API*: it
+qualifies a household's actual tariff — provider, offer, option, network area — and returns
+the priced time bands of exactly that contract: high/low tariff, night hours, dynamic
+prices, plus the feed-in price of a PV contract.
+
+1. Create a token at [api.selectra.com](https://api.selectra.com), then add the
+   integration and select **Selectra tariff planning**.
+2. Paste the **token**, your **country code** (`at`) and your **postcode**.
+3. Answer the questionnaire the API returns (which provider, which offer, which option …)
+   until it reports itself satisfied. The qualified offer is stored with the entry.
+
+The integration then adds a **Tariff Price** sensor in `ct/kWh` for the band that is
+running now, with the other bands as attributes: the next band, the cheapest upcoming band
+(and when it starts), the min/max/average still ahead, the feed-in price and the moment the
+plan will be updated next.
+
+> **This is a commercial third-party API, not a grid operator.** Every call needs a
+> personal bearer token and calls are metered:
+>
+> * **Free tier: 60 calls per calendar month** (all markets, all endpoints, no credit card).
+>   Qualifying a new entry costs a few calls, one price plan costs one.
+> * Paid plans start at 1 €/month per market; **Austria is 200 €/month** with per-request
+>   tiers above 10 000 calls.
+>
+> The integration spends as few calls as possible: a price plan carries a `next_update`
+> timestamp and is cached until then, so a household uses one or two calls per day no matter
+> how short the scan interval is. When the monthly quota is exhausted, the last plan keeps
+> being served and its reading is flagged `plan_expired` instead of failing every poll.
+>
+> The adapter was written against the public OpenAPI document (**Electricity Planning API
+> 1.0.0**), because every call is token gated: it is **not verified against the live
+> service**. Prices, the questionnaire and the error mapping follow the published schema.
+
+### Salzburg Netz
+
+[Salzburg Netz](https://www.salzburgnetz.at/service/serviceportal/programmierschnittstelle.html)
+(part of the Salzburg AG) runs its own interface next to the service portal. It reports
+the **15-minute load profile** of a metering point, which is the same data the portal's
+data analysis shows:
+
+1. In the service portal, open **Mein Benutzerkonto → API Schlüssel** and create a key.
+   Pick a validity period; a key lives at most two years, and up to ten keys can exist.
+2. Add the integration and select **Salzburg Netz**.
+3. Enter the **API key** and your **customer number** (GPNR, 8 digits, starting with 1).
+4. Leave **Metering points** empty to let the integration discover them, or type them in
+   separated by commas - a 33-character metering point (`AT00…`) or a 10-digit facility
+   number (`003…`).
+
+The integration adds a **load profile** sensor per metering point and register: the
+15-minute consumption and feed-in values in `Wh`, with the day's total for that register
+as an attribute next to the meter number and type from the API's device data.
+
+> **Two things are worth knowing.** The API is documented as a **POST-only** interface:
+> your key goes into the `Authorization` header, the customer number, metering point and
+> the optional dates `AB`/`BIS` go into the body. And the operator updates load profiles
+> **once a day** (between 10:00 and 12:00) and explicitly asks not to query the same period
+> more than once a day - which is why this provider reads a period at most once per day and
+> checks the key with the same rhythm, so a 60-minute scan interval costs one request per
+> metering point per day.
+>
+> **The shape of a successful response is not documented.** The operator's description
+> shows its example output as a CSV table; the JSON variant is not published anywhere, and
+> `/docs` or `/openapi.json` do not exist. The parser therefore reads records tolerantly
+> (instead of assuming a structure) and the endpoint addresses, the request body and the
+> error format were verified against the live API, but **the JSON field names are not
+> verified**. If a sensor stays without a value, the log says so and the raw response is
+> worth reporting:
+> [open an issue](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues).
+
+The `readings` (meter registers), `consumption` (billed amounts) and `partner` categories
+are not read yet.
 
 ## ✨ Features
 
-* **Easy Setup:** Configuration directly via the Home Assistant UI (Config Flow).
-* **Multi-Metering Point Support:** Supports accounts with multiple metering points/addresses.
-* **Automatic Detection:** Automatically detects Consumption (1.8.0) and Production/Feed-in (2.8.0).
-* **Statistics:** Retrieves daily consumption statistics ("Consumption Yesterday", "Consumption Day Before Yesterday").
-* **Diagnostics:** Provides detailed technical information as diagnostic entities:
-    * Full Address (Street, City, ZIP)
-    * Facility Type (e.g., Consumption/Feed-in)
-    * Contract Status (Active/Inactive)
-    * Market Readiness (Communicative Status)
-* **Clean Naming:** Uses the friendly names assigned in the web portal instead of long ID numbers.
+* **Easy setup:** configuration directly through the Home Assistant UI (config flow).
+* **Multi metering point support:** supports accounts with several metering points/addresses.
+* **Automatic detection:** detects consumption (1.8.0) and production/feed-in (2.8.0).
+* **Statistics:** daily consumption statistics ("Consumption Yesterday", "Consumption Day Before Yesterday") where the portal provides them.
+* **Diagnostics:** detailed technical information exposed as diagnostic entities:
+    * Full address (street, city, ZIP)
+    * Facility type (e.g. consumption/feed-in)
+    * Contract status (active/inactive)
+    * Market readiness (communicative status)
+* **Clean naming:** uses the friendly names assigned in the web portal instead of long ID numbers.
+* **Downloads diagnostics:** *Settings → Devices & Services → Austria Smartmeter → Download diagnostics*.
+* **Brand images included:** the integration ships its own icon and logo, so it shows up properly in the Home Assistant UI.
+
+## 📚 Documentation
+
+The project documentation lives in the **[wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)**,
+which covers **two lines of the integration at the same time**:
+
+| Document | What it covers |
+| :--- | :--- |
+| 🏠 **[Documentation home](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)** | Landing page: which document applies to which version. |
+| 📐 **[Architecture Design Document (ADD)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Architecture-Design-Document)** | Requirements, system context, component decomposition, architectural decisions, risks, roadmap. Applies to **1.2.x**. |
+| 🧩 **[Software Design Document (SDD)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Software-Design-Document)** | Module inventory, interface contracts, component design, sequence diagrams, error handling matrix, release process. Applies to **1.2.x**. |
+| 🗺️ **[Workflow Diagrams](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Workflow-Diagrams)** | Repository map (generated with [GitDiagram](https://gitdiagram.com/acdcnow/austriansmartmeter-for-home-assistant)) plus setup, update, login and entity-creation workflows. |
+| 🛠️ **[Adding a New Provider](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Adding-a-New-Provider)** | Developer guide for adding a grid operator. |
+| 🗄️ **[Archived 1.1.8 documentation](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Archive-1.1.8-Design-Documentation)** | The pre-2026.9 design, kept for reference. |
+
+If you are still on **v1.1.8** (branch `main`), read the archived documents — they describe
+the design of the version you are running.
 
 ## 📚 Documentation
 
@@ -48,60 +204,83 @@ This repository documents **two lines of the integration at the same time** in i
 
 ## 📥 Installation
 
-### Option 1: Via HACS (Recommended)
+### Option 1: Via HACS (recommended)
 
-Since this is a custom integration, add it as a **Custom Repository**:
+Since this is a custom integration, add it as a **custom repository**:
 
-1.  Open HACS in Home Assistant.
-2.  Go to "Integrations".
-3.  Click the three dots (`...`) in the top right corner and select **"Custom repositories"**.
-4.  Paste the URL of this repository.
-5.  Select **"Integration"** as the category.
-6.  Click "Add" and then install **"Austria Smartmeter"**.
-7.  Restart Home Assistant.
+1. Open HACS in Home Assistant.
+2. Go to "Integrations".
+3. Click the three dots (`...`) in the top right corner and select **"Custom repositories"**.
+4. Paste the URL of this repository.
+5. Select **"Integration"** as the category.
+6. Click "Add" and then install **"Austria Smartmeter"**.
+7. Restart Home Assistant.
 
 ### Option 2: Manual
 
-1.  Download the `custom_components/asm` folder from this repository.
-2.  Copy the folder to your Home Assistant directory under `/config/custom_components/`.
-3.  The structure should look like this: `/config/custom_components/asm/__init__.py`, etc.
-4.  Restart Home Assistant.
+1. Download the `custom_components/asm` folder from this repository.
+2. Copy the folder to your Home Assistant directory under `/config/custom_components/`.
+3. The structure should look like this: `/config/custom_components/asm/__init__.py`, etc.
+4. Restart Home Assistant.
 
 ## ⚙️ Configuration
 
-1.  In Home Assistant, go to **Settings** -> **Devices & Services**.
-2.  Click **"+ Add Integration"** in the bottom right.
-3.  Search for **"Austria Smartmeter"**.
-4.  Select your grid operator (e.g., Wiener Netze).
-5.  Enter your **Username** (usually email) and **Password** for the operator's web portal.
-6.  Upon successful login, your meters will be added automatically.
+1. In Home Assistant, go to **Settings → Devices & Services**.
+2. Click **"+ Add Integration"** in the bottom right.
+3. Search for **"Austria Smartmeter"**.
+4. Select your grid operator (e.g. Wiener Netze).
+5. Enter your **username** (usually email) and **password** for the operator's web portal.
+   For **energyLIVE (smartENERGY)** enter the **API key** instead, for
+   **DSMR / P1 meter (local)** the port your meter's customer interface is connected to,
+   for **aWATTar market prices** the market area, and for **Selectra tariff planning**
+   your API token, country code and postcode (followed by its questionnaire).
+   For **Salzburg Netz** enter the API key and customer number (GPNR) from the service
+   portal; the metering points are optional.
+6. Upon successful login, your meters will be added automatically.
 
 ### Options
-Clicking the "Configure" button on the integration entry allows you to set the **Scan Interval** (Default: every 360 minutes / 6 hours). Since data in the web portals usually only updates once a day (Day-After), a frequent poll is not necessary.
+
+Clicking the "Configure" button on the integration entry allows you to set the
+**scan interval** (default: every 360 minutes / 6 hours, minimum: 60 minutes).
+Since the portals usually only publish new data once a day, frequent polling is
+not necessary.
 
 ## 📊 Entities & Sensors
 
-The integration creates one Device per Metering Point ("Smart Meter [Name]"). You will find the following entities:
+The integration creates one device per metering point ("Smart Meter [name]") and
+the following entities.
 
-### Main Sensors
-* `sensor.smart_meter_name_energy_consumption_total` (Consumption, 1.8.0, in Wh)
-* `sensor.smart_meter_name_energy_production_total` (Production, 2.8.0, in Wh)
+### Main sensors
+
+* `sensor.<meter>_energy_consumption_total` (consumption, OBIS 1.8.0, in Wh)
+* `sensor.<meter>_energy_production_total` (production/feed-in, OBIS 2.8.0, in Wh)
+
+Wiener Netze reports cumulative meter readings, so these are
+`total_increasing` sensors and can be used with the Home Assistant energy
+dashboard directly.
+
+Netz Niederösterreich only exposes the **consumption of a period**, not the
+cumulative meter reading, so that provider gets a `Daily Consumption` sensor
+instead (also in Wh, `state_class: total`).
 
 ### Statistics
-* `sensor.smart_meter_name_consumption_yesterday`
-* `sensor.smart_meter_name_consumption_day_before_yesterday`
 
-### Diagnostics & Info
-* Metering Point ID (Zählpunktnummer)
+* `sensor.<meter>_consumption_yesterday`
+* `sensor.<meter>_consumption_day_before_yesterday`
+
+### Diagnostics & info
+
+* Metering point ID (Zählpunktnummer)
 * Customer ID (Geschäftspartner)
-* Address (Full address string)
-* Detailed Address (Street, ZIP, City, Stair, Door as individual entities)
-* Market Ready Status
-* Contract Active Status
+* Address (full address string)
+* Detailed address (street, ZIP, city, stair, door as individual entities)
+* Market ready status
+* Contract active status
 
 ## 🐛 Troubleshooting & Debugging
 
-If you encounter issues or no data is being returned, please enable debug logging in your `configuration.yaml` to see exactly what the API returns:
+If you encounter issues or no data is being returned, enable debug logging in
+your `configuration.yaml` to see exactly what the API returns:
 
 ```yaml
 logger:
@@ -110,10 +289,47 @@ logger:
     custom_components.asm: debug
 ```
 
-After a restart, check the Home Assistant logs for detailed output.
+After a restart, check the Home Assistant logs for detailed output. You can also
+download the diagnostics file from the integration page, which contains the
+(credential redacted) config entry and the last received payload.
+
+**"No metering points (contracts) found in this account"** – the login worked,
+but the portal account has no active contract, or the account is not enabled for
+the smart meter portal yet.
+
+**"Connection failed"** – the portal could not be reached, or it answered with
+something that was not JSON (for example an HTML error page). The debug log
+contains the HTTP status code and a snippet of the response.
+
+## 📝 Changelog
+
+### 1.2.0-beta.1
+
+* **Fixed the Netz Niederösterreich login** (issue #1): the login endpoint was
+  misspelled, so every setup attempt failed. The client now also reports a
+  readable error instead of `Expecting value: line 1 column 1 (char 0)` when the
+  portal answers with HTML.
+* Netz Niederösterreich now uses the current metering point endpoint, with an
+  automatic fallback to the older two step API.
+* Netz Niederösterreich consumption values are read from the current API shape
+  and converted from kWh to Wh.
+* **Compatibility with Home Assistant 2026.9:** the coordinator is stored in
+  `entry.runtime_data`, the config/options flow uses `ConfigFlowResult` and the
+  read only `config_entry` property, and the manifest declares `integration_type`.
+* Added integration **brand images** (icon and logo, light and dark).
+* Added a **documentation wiki** with an Architecture Design Document, a Software Design
+  Document and workflow diagrams, and archived the pre-2026.9 design documentation.
+* Added **diagnostics** support.
+* Removed the `requests` and `python-dateutil` requirements, they are provided by
+  Home Assistant Core.
+* Fixed the integration name typo and several documentation issues.
 
 ## ⚠️ Disclaimer
-This is a private community project and is not officially affiliated with Wiener Netze, Netz NÖ, or other grid operators. Use at your own risk. APIs may change at any time.
+
+This is a private community project and is not officially affiliated with Wiener
+Netze, Netz Niederösterreich (EVN) or any other grid operator. Use at your own
+risk. The provider APIs may change at any time.
 
 ## 📄 License
+
 MIT License

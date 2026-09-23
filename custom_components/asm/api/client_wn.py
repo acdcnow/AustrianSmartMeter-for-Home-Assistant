@@ -5,7 +5,6 @@ from typing import List, Dict, Any
 import requests
 import json
 from urllib import parse
-from dateutil.relativedelta import relativedelta
 from lxml import html
 import base64
 import hashlib
@@ -16,6 +15,16 @@ from . import constants as const
 from .errors import SmartmeterConnectionError, SmartmeterLoginError, SmartmeterQueryError
 
 logger = logging.getLogger(__name__)
+
+
+def _shift_years(value: date, years: int) -> date:
+    """Return ``value`` shifted by ``years`` without needing python-dateutil."""
+    try:
+        return value.replace(year=value.year + years)
+    except ValueError:
+        # 29 February in a non leap year
+        return value.replace(year=value.year + years, day=28)
+
 
 class WienerNetzeClient(SmartmeterClient):
     """Client for Wiener Netze."""
@@ -145,7 +154,7 @@ class WienerNetzeClient(SmartmeterClient):
 
     def historical_data(self, zaehlpunktnummer: str, date_from: date = None, date_until: date = None) -> List[Dict[str, Any]]:
         if date_until is None: date_until = date.today()
-        if date_from is None: date_from = date_until - relativedelta(years=3)
+        if date_from is None: date_from = _shift_years(date_until, -3)
         
         contracts = self.zaehlpunkte()
         customer_id = None
@@ -185,6 +194,9 @@ class WienerNetzeClient(SmartmeterClient):
         }
         if extra_headers: headers.update(extra_headers)
         
-        res = self.session.get(url, params=query, headers=headers)
-        res.raise_for_status()
-        return res.json()
+        try:
+            res = self.session.get(url, params=query, headers=headers)
+            res.raise_for_status()
+            return res.json()
+        except (requests.RequestException, ValueError) as err:
+            raise SmartmeterConnectionError(f"Request to {url} failed: {err}") from err
