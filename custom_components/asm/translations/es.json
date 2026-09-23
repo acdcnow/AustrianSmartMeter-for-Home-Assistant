@@ -20,6 +20,8 @@
           "token": "Token de API de Selectra (Bearer)",
           "country_code": "Código de país (p. ej. at)",
           "postcode": "Código postal",
+          "gpnr": "Número de cliente (GPNR, 8 dígitos)",
+          "metering_points": "Puntos de medida (ZP), opcional - separados por comas",
           "username": "Nombre de usuario (Email)",
           "password": "Contraseña"
         }

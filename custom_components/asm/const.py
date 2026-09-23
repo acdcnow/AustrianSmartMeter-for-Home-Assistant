@@ -34,6 +34,12 @@ CONF_POSTCODE = "postcode"
 CONF_SELECTRA_INPUTS = "inputs"
 CONF_SELECTRA_LABEL = "offer_label"
 
+# The Salzburg Netz API is opened with a personal key from the service portal and
+# the customer number it was issued for. The metering points are discovered from
+# the API where possible and can be entered by hand otherwise.
+CONF_GPNR = "gpnr"
+CONF_METERING_POINTS = "metering_points"
+
 # Providers
 PROVIDER_WIENER_NETZE = "wiener_netze"
 PROVIDER_NETZ_NOE = "netz_noe"
@@ -41,6 +47,7 @@ PROVIDER_ENERGYLIVE = "energylive"
 PROVIDER_DSMR = "dsmr"
 PROVIDER_AWATTAR = "awattar"
 PROVIDER_SELECTRA = "selectra"
+PROVIDER_SALZBURGNETZ = "salzburgnetz"
 PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 
 PROVIDERS = {
@@ -50,6 +57,7 @@ PROVIDERS = {
     PROVIDER_DSMR: "DSMR / P1 meter (local)",
     PROVIDER_AWATTAR: "aWATTar market prices",
     PROVIDER_SELECTRA: "Selectra tariff planning",
+    PROVIDER_SALZBURGNETZ: "Salzburg Netz",
     # PROVIDER_STROMNETZ_GRAZ: "Stromnetz Graz", # In Entwicklung
 }
 
@@ -79,7 +87,9 @@ __all__ = [
     "CONF_COUNTRY_CODE",
     "CONF_DSMR_VERSION",
     "CONF_ENCRYPTION_KEY",
+    "CONF_GPNR",
     "CONF_MARKET_AREA",
+    "CONF_METERING_POINTS",
     "CONF_PASSWORD",
     "CONF_POSTCODE",
     "CONF_PROVIDER",
@@ -98,6 +108,7 @@ __all__ = [
     "PROVIDER_DSMR",
     "PROVIDER_ENERGYLIVE",
     "PROVIDER_NETZ_NOE",
+    "PROVIDER_SALZBURGNETZ",
     "PROVIDER_SELECTRA",
     "PROVIDER_STROMNETZ_GRAZ",
     "PROVIDER_WIENER_NETZE",

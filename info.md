@@ -14,6 +14,7 @@ via their web portals.
 * ✅ **DSMR / P1 customer interface** (local serial cable or network P1 reader, no account)
 * ✅ **aWATTar market prices** (public EPEX price feed, no account)
 * ✅ **Selectra tariff planning** (third-party tariff API, personal token, 60 calls/month free)
+* ✅ **Salzburg Netz** (service portal API key, 15-minute load profiles)
 * 🚧 **Stromnetz Graz** (planned)
 
 **Requires Home Assistant 2026.9 or newer.**
@@ -49,6 +50,9 @@ reports cumulative meter readings (Wh) and the current power (W).
 **aWATTar market prices** and **Selectra tariff planning** read no meter at all: they add a
 price sensor so that load shifting can be automated. aWATTar is a public feed, Selectra is a
 commercial third-party API with a personal token and a free tier of 60 calls per month.
+
+**Salzburg Netz** is read through the API key of the service portal, next to the portal
+login of the other grid operators. It reports the 15-minute load profile of a metering point.
 
 ## 📚 Documentation
 

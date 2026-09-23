@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
     OBIS_NAMES,
     PROVIDER_AWATTAR,
+    PROVIDER_SALZBURGNETZ,
     PROVIDER_SELECTRA,
     PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
@@ -45,6 +46,11 @@ _PROVIDER_PORTALS = {
     PROVIDER_DSMR: ("DSMR / P1 meter", None),
     PROVIDER_AWATTAR: ("aWATTar", "https://www.awattar.at/services/api"),
     PROVIDER_SELECTRA: ("Selectra", "https://selectra.at/api-planung"),
+    PROVIDER_SALZBURGNETZ: (
+        "Salzburg Netz",
+        "https://www.salzburgnetz.at/service/serviceportal/"
+        "programmierschnittstelle.html",
+    ),
 }
 
 

@@ -20,6 +20,7 @@ and statistics.
 | **DSMR / P1 customer interface** | ✅ Supported | Local serial cable or network P1 reader. No account required |
 | **aWATTar market prices** | ✅ Supported | Price feed (EPEX day-ahead), not meter data. No account required |
 | **Selectra tariff planning** | ✅ Supported | Third-party tariff API, personal token required. Free tier: 60 calls/month |
+| **Salzburg Netz** | ✅ Supported | API key from the service portal + customer number. 15-minute load profiles |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
@@ -113,6 +114,45 @@ plan will be updated next.
 > 1.0.0**), because every call is token gated: it is **not verified against the live
 > service**. Prices, the questionnaire and the error mapping follow the published schema.
 
+### Salzburg Netz
+
+[Salzburg Netz](https://www.salzburgnetz.at/service/serviceportal/programmierschnittstelle.html)
+(part of the Salzburg AG) runs its own interface next to the service portal. It reports
+the **15-minute load profile** of a metering point, which is the same data the portal's
+data analysis shows:
+
+1. In the service portal, open **Mein Benutzerkonto → API Schlüssel** and create a key.
+   Pick a validity period; a key lives at most two years, and up to ten keys can exist.
+2. Add the integration and select **Salzburg Netz**.
+3. Enter the **API key** and your **customer number** (GPNR, 8 digits, starting with 1).
+4. Leave **Metering points** empty to let the integration discover them, or type them in
+   separated by commas - a 33-character metering point (`AT00…`) or a 10-digit facility
+   number (`003…`).
+
+The integration adds a **load profile** sensor per metering point and register: the
+15-minute consumption and feed-in values in `Wh`, with the day's total for that register
+as an attribute next to the meter number and type from the API's device data.
+
+> **Two things are worth knowing.** The API is documented as a **POST-only** interface:
+> your key goes into the `Authorization` header, the customer number, metering point and
+> the optional dates `AB`/`BIS` go into the body. And the operator updates load profiles
+> **once a day** (between 10:00 and 12:00) and explicitly asks not to query the same period
+> more than once a day - which is why this provider reads a period at most once per day and
+> checks the key with the same rhythm, so a 60-minute scan interval costs one request per
+> metering point per day.
+>
+> **The shape of a successful response is not documented.** The operator's description
+> shows its example output as a CSV table; the JSON variant is not published anywhere, and
+> `/docs` or `/openapi.json` do not exist. The parser therefore reads records tolerantly
+> (instead of assuming a structure) and the endpoint addresses, the request body and the
+> error format were verified against the live API, but **the JSON field names are not
+> verified**. If a sensor stays without a value, the log says so and the raw response is
+> worth reporting:
+> [open an issue](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues).
+
+The `readings` (meter registers), `consumption` (billed amounts) and `partner` categories
+are not read yet.
+
 ## ✨ Features
 
 * **Easy setup:** configuration directly through the Home Assistant UI (config flow).
@@ -177,6 +217,8 @@ Since this is a custom integration, add it as a **custom repository**:
    **DSMR / P1 meter (local)** the port your meter's customer interface is connected to,
    for **aWATTar market prices** the market area, and for **Selectra tariff planning**
    your API token, country code and postcode (followed by its questionnaire).
+   For **Salzburg Netz** enter the API key and customer number (GPNR) from the service
+   portal; the metering points are optional.
 6. Upon successful login, your meters will be added automatically.
 
 ### Options

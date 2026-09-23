@@ -31,7 +31,9 @@ from .const import (
     CONF_COUNTRY_CODE,
     CONF_DSMR_VERSION,
     CONF_ENCRYPTION_KEY,
+    CONF_GPNR,
     CONF_MARKET_AREA,
+    CONF_METERING_POINTS,
     CONF_PORT,
     CONF_POSTCODE,
     CONF_PROVIDER,
@@ -47,6 +49,7 @@ from .const import (
     PROVIDER_AWATTAR,
     PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
+    PROVIDER_SALZBURGNETZ,
     PROVIDER_SELECTRA,
     PROVIDER_WIENER_NETZE,
 )
@@ -72,6 +75,18 @@ def _credentials_schema(provider: str) -> vol.Schema:
                 vol.Required(CONF_TOKEN): str,
                 vol.Optional(CONF_COUNTRY_CODE, default=DEFAULT_COUNTRY_CODE): str,
                 vol.Optional(CONF_POSTCODE, default=""): str,
+            }
+        )
+    if provider == PROVIDER_SALZBURGNETZ:
+        # A personal key from the service portal and the customer number it was
+        # issued for. The metering points are discovered through the API where
+        # possible; because that listing is undocumented they can also be typed
+        # in, separated by commas.
+        return vol.Schema(
+            {
+                vol.Required(CONF_API_KEY): str,
+                vol.Required(CONF_GPNR): str,
+                vol.Optional(CONF_METERING_POINTS, default=""): str,
             }
         )
     if provider == PROVIDER_DSMR:
@@ -222,6 +237,16 @@ class AustriaSmartMeterConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                     CONF_ENCRYPTION_KEY: (
                         user_input.get(CONF_ENCRYPTION_KEY) or ""
+                    ).strip(),
+                }
+            elif provider == PROVIDER_SALZBURGNETZ:
+                identifier = (user_input.get(CONF_GPNR) or "").strip()
+                entry_data = {
+                    CONF_PROVIDER: provider,
+                    CONF_API_KEY: (user_input.get(CONF_API_KEY) or "").strip(),
+                    CONF_GPNR: identifier,
+                    CONF_METERING_POINTS: (
+                        user_input.get(CONF_METERING_POINTS) or ""
                     ).strip(),
                 }
             elif wants_api_key:
