@@ -17,12 +17,14 @@ from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
 
 from .api.client import get_client
+from .api.client_awattar import DEFAULT_MARKET_AREA, MARKET_AREAS
 from .api.dsmr_versions import DEFAULT_DSMR_VERSION, VERSION_LABELS
 from .api.errors import SmartmeterError, SmartmeterLoginError
 from .const import (
     CONF_API_KEY,
     CONF_DSMR_VERSION,
     CONF_ENCRYPTION_KEY,
+    CONF_MARKET_AREA,
     CONF_PORT,
     CONF_PROVIDER,
     CONF_SCAN_INTERVAL,
@@ -31,6 +33,7 @@ from .const import (
     LOGGER,
     MIN_SCAN_INTERVAL,
     PROVIDERS,
+    PROVIDER_AWATTAR,
     PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
     PROVIDER_WIENER_NETZE,
@@ -61,12 +64,31 @@ def _credentials_schema(provider: str) -> vol.Schema:
         )
     if provider in _API_KEY_PROVIDERS:
         return vol.Schema({vol.Required(CONF_API_KEY): str})
+    if provider == PROVIDER_AWATTAR:
+        # The market feed has no credential, only a market to pick.
+        return vol.Schema(
+            {
+                vol.Required(
+                    CONF_MARKET_AREA, default=DEFAULT_MARKET_AREA
+                ): vol.In({code: name for code, (_, name) in MARKET_AREAS.items()})
+            }
+        )
     return vol.Schema(
         {
             vol.Required(CONF_USERNAME): str,
             vol.Required(CONF_PASSWORD): str,
         }
     )
+
+
+def _entry_label(provider: str, identifier: str) -> str:
+    """Return the label that goes into the title of the config entry."""
+    if provider in _API_KEY_PROVIDERS:
+        # Never put the credential itself into the title.
+        return _mask(identifier)
+    if provider == PROVIDER_AWATTAR:
+        return MARKET_AREAS.get(identifier, ("", identifier))[1]
+    return identifier
 
 
 def _unique_id(provider: str, identifier: str) -> str:
@@ -122,8 +144,9 @@ class AustriaSmartMeterConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the credentials step.
 
         Providers with a portal login ask for user name and password, providers
-        that authenticate with an API key (energyLIVE) ask for the key, and the
-        DSMR customer interface asks for the port it is connected to.
+        that authenticate with an API key (energyLIVE) ask for the key, the DSMR
+        customer interface asks for the port it is connected to, and the aWATTar
+        feed asks for the market area.
         """
         errors: dict[str, str] = {}
         provider: str = self.context.get(CONF_PROVIDER) or self._provider
@@ -145,6 +168,11 @@ class AustriaSmartMeterConfigFlow(ConfigFlow, domain=DOMAIN):
             elif wants_api_key:
                 identifier = (user_input.get(CONF_API_KEY) or "").strip()
                 entry_data = {CONF_PROVIDER: provider, CONF_API_KEY: identifier}
+            elif provider == PROVIDER_AWATTAR:
+                identifier = (
+                    user_input.get(CONF_MARKET_AREA) or DEFAULT_MARKET_AREA
+                ).strip()
+                entry_data = {CONF_PROVIDER: provider, CONF_MARKET_AREA: identifier}
             else:
                 identifier = user_input[CONF_USERNAME]
                 entry_data = {**user_input, CONF_PROVIDER: provider}
@@ -170,8 +198,8 @@ class AustriaSmartMeterConfigFlow(ConfigFlow, domain=DOMAIN):
                     LOGGER.error("Config flow: login succeeded but no contracts found")
                     errors["base"] = "no_contracts"
                 else:
-                    # Never put the credential itself into the entry title.
-                    label = _mask(identifier) if wants_api_key else identifier
+                    # Never put a credential into the entry title.
+                    label = _entry_label(provider, identifier)
                     LOGGER.debug(
                         "Config flow: creating entry for %s (%s)", label, provider
                     )

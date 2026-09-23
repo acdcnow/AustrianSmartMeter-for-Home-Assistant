@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .base import SmartmeterClient
+from .client_awattar import AwattarClient
 from .client_energylive import EnergyliveClient
 from .client_noe import NetzNoeClient
 from .client_wn import WienerNetzeClient
@@ -10,9 +11,11 @@ from ..const import (
     CONF_API_KEY,
     CONF_DSMR_VERSION,
     CONF_ENCRYPTION_KEY,
+    CONF_MARKET_AREA,
     CONF_PASSWORD,
     CONF_PORT,
     CONF_USERNAME,
+    PROVIDER_AWATTAR,
     PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
     PROVIDER_NETZ_NOE,
@@ -38,6 +41,9 @@ def get_client(
 
     if provider == PROVIDER_ENERGYLIVE:
         return EnergyliveClient(data.get(CONF_API_KEY))
+
+    if provider == PROVIDER_AWATTAR:
+        return AwattarClient(data.get(CONF_MARKET_AREA))
 
     if provider == PROVIDER_DSMR:
         # Imported on demand: this provider needs dsmr-parser and serialx, and a

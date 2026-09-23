@@ -16,6 +16,7 @@
           "port": "Port (e.g. /dev/ttyUSB0 or socket://host:23)",
           "dsmr_version": "DSMR version",
           "encryption_key": "Decryption key (encrypted meters only)",
+          "market_area": "Market area",
           "username": "Username (Email)",
           "password": "Password"
         }

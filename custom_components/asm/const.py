@@ -17,11 +17,15 @@ CONF_PROVIDER = "provider"
 CONF_DSMR_VERSION = "dsmr_version"
 CONF_ENCRYPTION_KEY = "encryption_key"
 
+# The aWATTar market feed is selected by market area, not by a credential.
+CONF_MARKET_AREA = "market_area"
+
 # Providers
 PROVIDER_WIENER_NETZE = "wiener_netze"
 PROVIDER_NETZ_NOE = "netz_noe"
 PROVIDER_ENERGYLIVE = "energylive"
 PROVIDER_DSMR = "dsmr"
+PROVIDER_AWATTAR = "awattar"
 PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 
 PROVIDERS = {
@@ -29,6 +33,7 @@ PROVIDERS = {
     PROVIDER_NETZ_NOE: "Netz Niederösterreich (EVN)",
     PROVIDER_ENERGYLIVE: "energyLIVE (smartENERGY)",
     PROVIDER_DSMR: "DSMR / P1 meter (local)",
+    PROVIDER_AWATTAR: "aWATTar market prices",
     # PROVIDER_STROMNETZ_GRAZ: "Stromnetz Graz", # In Entwicklung
 }
 
@@ -57,6 +62,7 @@ __all__ = [
     "CONF_API_KEY",
     "CONF_DSMR_VERSION",
     "CONF_ENCRYPTION_KEY",
+    "CONF_MARKET_AREA",
     "CONF_PASSWORD",
     "CONF_PROVIDER",
     "CONF_SCAN_INTERVAL",
@@ -67,6 +73,7 @@ __all__ = [
     "MIN_SCAN_INTERVAL",
     "OBIS_NAMES",
     "PROVIDERS",
+    "PROVIDER_AWATTAR",
     "PROVIDER_DSMR",
     "PROVIDER_ENERGYLIVE",
     "PROVIDER_NETZ_NOE",

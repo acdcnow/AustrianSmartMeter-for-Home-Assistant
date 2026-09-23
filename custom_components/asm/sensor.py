@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     OBIS_NAMES,
+    PROVIDER_AWATTAR,
     PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
     PROVIDER_NETZ_NOE,
@@ -41,6 +42,7 @@ _PROVIDER_PORTALS = {
     PROVIDER_NETZ_NOE: ("Netz Niederösterreich (EVN)", "https://smartmeter.netz-noe.at/"),
     PROVIDER_ENERGYLIVE: ("smartENERGY", "https://www.smartenergy.at/energylive"),
     PROVIDER_DSMR: ("DSMR / P1 meter", None),
+    PROVIDER_AWATTAR: ("aWATTar", "https://www.awattar.at/services/api"),
 }
 
 
@@ -168,11 +170,15 @@ def _get_shared_device_info(
     """Generate the device info dict shared by all entities of a meter."""
     manufacturer, configuration_url = _provider_details(provider_id)
 
+    # A provider that is not a meter (a price feed, a P1 interface) may name its
+    # own model; the generic default stays "Smart Meter …".
+    model = info.get("device_model") or f"Smart Meter {info.get('zaehlpunktAnlagentyp', '')}"
+
     return DeviceInfo(
         identifiers={(DOMAIN, zaehlpunkt)},
         name=_get_clean_meter_name(info),
         manufacturer=manufacturer,
-        model=f"Smart Meter {info.get('zaehlpunktAnlagentyp', '')}".strip(),
+        model=model.strip(),
         serial_number=info.get("geraetNumber"),
         hw_version=str(info.get("equipmentNumber") or "Unknown"),
         configuration_url=configuration_url,
@@ -215,6 +221,12 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
 
             # The portal values are normalised to Wh by the API clients.
             self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+        elif self._unit:
+            # A unit the platform does not model, for instance the ct/kWh of a
+            # price feed. The value is still a measurement - it can be charted -
+            # it simply has no device class.
+            self._attr_native_unit_of_measurement = self._unit
+            self._attr_state_class = SensorStateClass.MEASUREMENT
 
         # Naming
         meter_name = _get_clean_meter_name(info)

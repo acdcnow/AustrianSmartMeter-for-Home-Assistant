@@ -18,6 +18,7 @@ and statistics.
 | **Netz Niederösterreich (EVN)** | ✅ Supported | Smart Meter Web Portal account required |
 | **energyLIVE (smartENERGY)** | ✅ Supported | Meter reader hardware, not a grid operator. API key required (see below) |
 | **DSMR / P1 customer interface** | ✅ Supported | Local serial cable or network P1 reader. No account required |
+| **aWATTar market prices** | ✅ Supported | Price feed (EPEX day-ahead), not meter data. No account required |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
@@ -57,6 +58,24 @@ Gas and water values that a telegram carries over M-Bus are not exposed.
 > **Note:** Home Assistant's own [DSMR integration](https://www.home-assistant.io/integrations/dsmr)
 > reads the very same interface with push updates (every 10 seconds). Use it if you want
 > real-time data; this integration polls, with a minimum interval of 60 minutes.
+
+### aWATTar market prices
+
+[aWATTar](https://www.awattar.at/services/api) publishes the EPEX Spot day-ahead prices of
+the Austrian and German market over a public API — no account, no token:
+
+1. Add the integration and select **aWATTar market prices**.
+2. Pick the **market area** (Austria or Germany).
+
+The integration then adds a **Market Price** sensor in `ct/kWh` for the hour that is
+currently running, with the rest of the horizon as attributes: the next hour's price, the
+cheapest upcoming hour (and when it starts), the min/max/average of everything still
+ahead, and the price exactly as the API delivered it. Negative prices are passed through
+unchanged, because they are the interesting ones.
+
+> This provider reads no meter. It is included because the hourly price is what makes
+> load shifting (heat pump, wallbox, battery) automatable. aWATTar asks for fair use of
+> 100 requests per day; one request per scan interval uses 24 of them.
 
 ## ✨ Features
 
@@ -118,8 +137,9 @@ Since this is a custom integration, add it as a **custom repository**:
 3. Search for **"Austria Smartmeter"**.
 4. Select your grid operator (e.g. Wiener Netze).
 5. Enter your **username** (usually email) and **password** for the operator's web portal.
-   For **energyLIVE (smartENERGY)** enter the **API key** instead, and for
-   **DSMR / P1 meter (local)** the port your meter's customer interface is connected to.
+   For **energyLIVE (smartENERGY)** enter the **API key** instead, for
+   **DSMR / P1 meter (local)** the port your meter's customer interface is connected to,
+   and for **aWATTar market prices** the market area.
 6. Upon successful login, your meters will be added automatically.
 
 ### Options
