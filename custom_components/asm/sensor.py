@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     OBIS_NAMES,
+    PROVIDER_DSMR,
     PROVIDER_ENERGYLIVE,
     PROVIDER_NETZ_NOE,
     PROVIDER_WIENER_NETZE,
@@ -39,6 +40,7 @@ _PROVIDER_PORTALS = {
     PROVIDER_WIENER_NETZE: ("Wiener Netze", "https://smartmeter-web.wienernetze.at/"),
     PROVIDER_NETZ_NOE: ("Netz Niederösterreich (EVN)", "https://smartmeter.netz-noe.at/"),
     PROVIDER_ENERGYLIVE: ("smartENERGY", "https://www.smartenergy.at/energylive"),
+    PROVIDER_DSMR: ("DSMR / P1 meter", None),
 }
 
 

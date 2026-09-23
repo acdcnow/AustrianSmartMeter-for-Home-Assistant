@@ -13,6 +13,9 @@
         "description": "Veuillez entrer vos identifiants pour **{provider_name}**.",
         "data": {
           "api_key": "Clé API",
+          "port": "Port (p. ex. /dev/ttyUSB0 ou socket://host:23)",
+          "dsmr_version": "Version DSMR",
+          "encryption_key": "Clé de déchiffrement (compteurs chiffrés uniquement)",
           "username": "Nom d'utilisateur (E-mail)",
           "password": "Mot de passe"
         }

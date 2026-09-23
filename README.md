@@ -17,6 +17,7 @@ and statistics.
 | **Wiener Netze** | ✅ Supported | Smart Meter Web Portal account required |
 | **Netz Niederösterreich (EVN)** | ✅ Supported | Smart Meter Web Portal account required |
 | **energyLIVE (smartENERGY)** | ✅ Supported | Meter reader hardware, not a grid operator. API key required (see below) |
+| **DSMR / P1 customer interface** | ✅ Supported | Local serial cable or network P1 reader. No account required |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
@@ -36,6 +37,26 @@ The devices report genuine cumulative meter readings — consumption (`1.8.0`) a
 (`2.8.0`) in Wh — which is exactly what the integration's total-increasing sensors expect,
 plus the current power in W. The API has no history and no daily statistics, and the
 values are only as fresh as the configured scan interval (see *Options* below).
+
+### DSMR / P1 customer interface (local)
+
+A meter's customer interface can also be read directly. It is a physical port ("H1",
+6-pin RJ12) that pushes a DSMR telegram every 10 seconds, so all that is needed is the
+connection to it:
+
+1. Add the integration and select **DSMR / P1 meter (local)**.
+2. Enter the **port**: `/dev/ttyUSB0`, a `/dev/serial/by-id/…` path, or
+   `socket://<host>:<port>` for a P1 reader on your network.
+3. Pick the **DSMR version** (the Austrian *Sagemcom T210-D-R* is listed by name) and, for
+   an encrypted meter, paste the **decryption key** your grid operator provided.
+
+The integration reads one telegram per scan interval and reports the cumulative registers
+(`1.8.0` consumption / `2.8.0` feed-in in Wh) plus the current power (`1.7.0`/`2.7.0` in W).
+Gas and water values that a telegram carries over M-Bus are not exposed.
+
+> **Note:** Home Assistant's own [DSMR integration](https://www.home-assistant.io/integrations/dsmr)
+> reads the very same interface with push updates (every 10 seconds). Use it if you want
+> real-time data; this integration polls, with a minimum interval of 60 minutes.
 
 ## ✨ Features
 
@@ -97,7 +118,8 @@ Since this is a custom integration, add it as a **custom repository**:
 3. Search for **"Austria Smartmeter"**.
 4. Select your grid operator (e.g. Wiener Netze).
 5. Enter your **username** (usually email) and **password** for the operator's web portal.
-   For **energyLIVE (smartENERGY)** enter the **API key** instead.
+   For **energyLIVE (smartENERGY)** enter the **API key** instead, and for
+   **DSMR / P1 meter (local)** the port your meter's customer interface is connected to.
 6. Upon successful login, your meters will be added automatically.
 
 ### Options

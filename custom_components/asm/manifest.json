@@ -10,6 +10,7 @@
     "iot_class": "cloud_polling",
     "issue_tracker": "https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues",
     "requirements": [
+        "dsmr-parser==1.11.1",
         "lxml"
     ],
     "version": "1.2.0-beta.1"

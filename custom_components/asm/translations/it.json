@@ -13,6 +13,9 @@
         "description": "Inserisci le tue credenziali per **{provider_name}**.",
         "data": {
           "api_key": "Chiave API",
+          "port": "Porta (es. /dev/ttyUSB0 o socket://host:23)",
+          "dsmr_version": "Versione DSMR",
+          "encryption_key": "Chiave di decrittazione (solo contatori cifrati)",
           "username": "Nome utente (Email)",
           "password": "Password"
         }

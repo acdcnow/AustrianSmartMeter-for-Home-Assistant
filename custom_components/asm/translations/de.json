@@ -13,6 +13,9 @@
         "description": "Bitte geben Sie Ihre Zugangsdaten für **{provider_name}** ein.",
         "data": {
           "api_key": "API-Schlüssel",
+          "port": "Anschluss (z. B. /dev/ttyUSB0 oder socket://host:23)",
+          "dsmr_version": "DSMR-Version",
+          "encryption_key": "Entschlüsselungsschlüssel (nur verschlüsselte Zähler)",
           "username": "Benutzername (E-Mail)",
           "password": "Passwort"
         }

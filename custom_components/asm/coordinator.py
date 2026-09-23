@@ -12,11 +12,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api.client import get_client
 from .api.errors import SmartmeterError, SmartmeterLoginError
 from .const import (
-    CONF_API_KEY,
-    CONF_PASSWORD,
     CONF_PROVIDER,
     CONF_SCAN_INTERVAL,
-    CONF_USERNAME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     LOGGER,
@@ -31,13 +28,8 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
         self.provider: str = entry.data.get(CONF_PROVIDER, PROVIDER_WIENER_NETZE)
-        self.client = get_client(
-            self.provider,
-            entry.data.get(CONF_USERNAME),
-            entry.data.get(CONF_PASSWORD),
-            # Only the API-key providers (energyLIVE) use this.
-            api_key=entry.data.get(CONF_API_KEY),
-        )
+        # Every provider reads what it needs out of the entry data.
+        self.client = get_client(self.provider, entry.data)
 
         super().__init__(
             hass,

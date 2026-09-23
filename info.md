@@ -11,6 +11,7 @@ via their web portals.
 * ✅ **Wiener Netze**
 * ✅ **Netz Niederösterreich (EVN)**
 * ✅ **energyLIVE** (smartENERGY, API key)
+* ✅ **DSMR / P1 customer interface** (local serial cable or network P1 reader, no account)
 * 🚧 **Stromnetz Graz** (planned)
 
 **Requires Home Assistant 2026.9 or newer.**
