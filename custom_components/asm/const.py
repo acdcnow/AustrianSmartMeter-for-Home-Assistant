@@ -43,6 +43,7 @@ CONF_METERING_POINTS = "metering_points"
 # Providers
 PROVIDER_WIENER_NETZE = "wiener_netze"
 PROVIDER_NETZ_NOE = "netz_noe"
+PROVIDER_ENERGIEDATEN = "energiedaten_at"
 PROVIDER_ENERGYLIVE = "energylive"
 PROVIDER_DSMR = "dsmr"
 PROVIDER_AWATTAR = "awattar"
@@ -53,6 +54,7 @@ PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 PROVIDERS = {
     PROVIDER_WIENER_NETZE: "Wiener Netze",
     PROVIDER_NETZ_NOE: "Netz Niederösterreich (EVN)",
+    PROVIDER_ENERGIEDATEN: "energiedaten.at (API key)",
     PROVIDER_ENERGYLIVE: "energyLIVE (smartENERGY)",
     PROVIDER_DSMR: "DSMR / P1 meter (local)",
     PROVIDER_AWATTAR: "aWATTar market prices",
@@ -106,6 +108,7 @@ __all__ = [
     "PROVIDERS",
     "PROVIDER_AWATTAR",
     "PROVIDER_DSMR",
+    "PROVIDER_ENERGIEDATEN",
     "PROVIDER_ENERGYLIVE",
     "PROVIDER_NETZ_NOE",
     "PROVIDER_SALZBURGNETZ",

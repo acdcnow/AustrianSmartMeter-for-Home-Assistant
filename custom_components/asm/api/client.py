@@ -4,6 +4,7 @@ from typing import Any
 
 from .base import SmartmeterClient
 from .client_awattar import AwattarClient
+from .client_energiedaten import EnergiedatenAtClient
 from .client_energylive import EnergyliveClient
 from .client_noe import NetzNoeClient
 from .client_salzburgnetz import SalzburgNetzClient
@@ -24,6 +25,7 @@ from ..const import (
     CONF_USERNAME,
     PROVIDER_AWATTAR,
     PROVIDER_DSMR,
+    PROVIDER_ENERGIEDATEN,
     PROVIDER_ENERGYLIVE,
     PROVIDER_NETZ_NOE,
     PROVIDER_SALZBURGNETZ,
@@ -50,6 +52,9 @@ def get_client(
 
     if provider == PROVIDER_ENERGYLIVE:
         return EnergyliveClient(data.get(CONF_API_KEY))
+
+    if provider == PROVIDER_ENERGIEDATEN:
+        return EnergiedatenAtClient(data.get(CONF_API_KEY))
 
     if provider == PROVIDER_AWATTAR:
         return AwattarClient(data.get(CONF_MARKET_AREA))

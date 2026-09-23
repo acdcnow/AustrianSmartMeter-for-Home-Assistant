@@ -11,6 +11,7 @@ via their web portals.
 * ✅ **Wiener Netze**
 * ✅ **Netz Niederösterreich (EVN)**
 * ✅ **energyLIVE** (smartENERGY, API key)
+* ✅ **energiedaten.at** (API key, not a grid operator)
 * ✅ **DSMR / P1 customer interface** (local serial cable or network P1 reader, no account)
 * ✅ **aWATTar market prices** (public EPEX price feed, no account)
 * ✅ **Selectra tariff planning** (third-party tariff API, personal token, 60 calls/month free)
@@ -53,6 +54,11 @@ commercial third-party API with a personal token and a free tier of 60 calls per
 
 **Salzburg Netz** is read through the API key of the service portal, next to the portal
 login of the other grid operators. It reports the 15-minute load profile of a metering point.
+
+**energiedaten.at** is a data platform rather than a grid operator and is configured
+with an **API key** (*Integrations → API Keys* in its dashboard, scopes
+`smart-meters:read` and `data:read`) instead of a portal login. The metering point has
+to be added and consented there first - the integration only reads data.
 
 ## 📚 Documentation
 

@@ -17,6 +17,7 @@ and statistics.
 | **Wiener Netze** | ✅ Supported | Smart Meter Web Portal account required |
 | **Netz Niederösterreich (EVN)** | ✅ Supported | Smart Meter Web Portal account required |
 | **energyLIVE (smartENERGY)** | ✅ Supported | Meter reader hardware, not a grid operator. API key required (see below) |
+| **energiedaten.at** | ✅ Supported | Data platform, not a grid operator. API key required (see below) |
 | **DSMR / P1 customer interface** | ✅ Supported | Local serial cable or network P1 reader. No account required |
 | **aWATTar market prices** | ✅ Supported | Price feed (EPEX day-ahead), not meter data. No account required |
 | **Selectra tariff planning** | ✅ Supported | Third-party tariff API, personal token required. Free tier: 60 calls/month |
@@ -40,6 +41,25 @@ The devices report genuine cumulative meter readings — consumption (`1.8.0`) a
 (`2.8.0`) in Wh — which is exactly what the integration's total-increasing sensors expect,
 plus the current power in W. The API has no history and no daily statistics, and the
 values are only as fresh as the configured scan interval (see *Options* below).
+
+### energiedaten.at (API platform)
+
+[energiedaten.at](https://energiedaten.at/) collects smart meter data from the Austrian
+grid operators and republishes it through a REST API. It is therefore configured
+differently from the portals above:
+
+1. Create an API key in the energiedaten.at dashboard under **Integrations → API Keys**
+   with the scopes `smart-meters:read` and `data:read`. The key is shown once.
+2. Add the metering point there (**Smart Meters**) and request its consent. Data starts
+   flowing the day after the grid operator accepts; the meter is ready when its status is
+   `connected`.
+3. In Home Assistant, add the integration, select **energiedaten.at (API key)** and paste
+   the key.
+
+The integration is read-only for this provider: it never creates locations, meters or
+consents. The platform publishes 15-minute interval readings, which are summed up per
+local day and reported as daily consumption/feed-in in Wh (the API exposes no cumulative
+meter register).
 
 ### DSMR / P1 customer interface (local)
 
@@ -236,6 +256,7 @@ Since this is a custom integration, add it as a **custom repository**:
    your API token, country code and postcode (followed by its questionnaire).
    For **Salzburg Netz** enter the API key and customer number (GPNR) from the service
    portal; the metering points are optional.
+   For **energiedaten.at** enter the **API key** of its dashboard as well.
 6. Upon successful login, your meters will be added automatically.
 
 ### Options

@@ -48,6 +48,7 @@ from .const import (
     PROVIDERS,
     PROVIDER_AWATTAR,
     PROVIDER_DSMR,
+    PROVIDER_ENERGIEDATEN,
     PROVIDER_ENERGYLIVE,
     PROVIDER_SALZBURGNETZ,
     PROVIDER_SELECTRA,
@@ -56,11 +57,16 @@ from .const import (
 
 # Providers that hand out an API key instead of a portal account. They ask for a
 # single secret and have no user name.
-_API_KEY_PROVIDERS = {PROVIDER_ENERGYLIVE}
+_API_KEY_PROVIDERS = {PROVIDER_ENERGIEDATEN, PROVIDER_ENERGYLIVE}
 
 # Providers whose identifier is hashed into the unique id instead of being used
 # verbatim (a secret, or a connection string with awkward characters).
-_HASHED_IDENTIFIERS = {PROVIDER_ENERGYLIVE, PROVIDER_DSMR, PROVIDER_SELECTRA}
+_HASHED_IDENTIFIERS = {
+    PROVIDER_ENERGIEDATEN,
+    PROVIDER_ENERGYLIVE,
+    PROVIDER_DSMR,
+    PROVIDER_SELECTRA,
+}
 
 
 def _credentials_schema(provider: str) -> vol.Schema:
