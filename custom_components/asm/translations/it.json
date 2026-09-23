@@ -12,6 +12,7 @@
         "title": "Autenticazione",
         "description": "Inserisci le tue credenziali per **{provider_name}**.",
         "data": {
+          "api_key": "Chiave API",
           "username": "Nome utente (Email)",
           "password": "Password"
         }
@@ -19,7 +20,7 @@
     },
     "error": {
       "cannot_connect": "Connessione fallita. Controlla la tua connessione internet.",
-      "invalid_auth": "Autenticazione fallita. Controlla username e password.",
+      "invalid_auth": "Autenticazione fallita. Controlla le tue credenziali.",
       "no_contracts": "Nessun punto di misurazione trovato in questo account.",
       "unknown": "Errore imprevisto."
     },

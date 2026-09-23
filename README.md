@@ -16,9 +16,26 @@ and statistics.
 | :--- | :--- | :--- |
 | **Wiener Netze** | ✅ Supported | Smart Meter Web Portal account required |
 | **Netz Niederösterreich (EVN)** | ✅ Supported | Smart Meter Web Portal account required |
+| **energyLIVE (smartENERGY)** | ✅ Supported | Meter reader hardware, not a grid operator. API key required (see below) |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
+
+### energyLIVE (smartENERGY)
+
+[energyLIVE](https://www.smartenergy.at/energylive) reads the smart meter through a small
+*interface* (optionally paired with a *gateway* that forwards the data over LoRa), so it
+is neither a grid operator nor a portal login:
+
+1. Get an API key in the smartENERGY app or customer portal (**API Key verwalten**).
+   Being a smartENERGY customer is not required.
+2. In Home Assistant, add the integration, select **energyLIVE (smartENERGY)** and paste
+   the key. The paired devices are found automatically.
+
+The devices report genuine cumulative meter readings — consumption (`1.8.0`) and feed-in
+(`2.8.0`) in Wh — which is exactly what the integration's total-increasing sensors expect,
+plus the current power in W. The API has no history and no daily statistics, and the
+values are only as fresh as the configured scan interval (see *Options* below).
 
 ## ✨ Features
 
@@ -80,6 +97,7 @@ Since this is a custom integration, add it as a **custom repository**:
 3. Search for **"Austria Smartmeter"**.
 4. Select your grid operator (e.g. Wiener Netze).
 5. Enter your **username** (usually email) and **password** for the operator's web portal.
+   For **energyLIVE (smartENERGY)** enter the **API key** instead.
 6. Upon successful login, your meters will be added automatically.
 
 ### Options

@@ -9,13 +9,19 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, UnitOfEnergy
+from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, OBIS_NAMES, PROVIDER_NETZ_NOE, PROVIDER_WIENER_NETZE
+from .const import (
+    DOMAIN,
+    OBIS_NAMES,
+    PROVIDER_ENERGYLIVE,
+    PROVIDER_NETZ_NOE,
+    PROVIDER_WIENER_NETZE,
+)
 from .coordinator import AustriaSmartMeterCoordinator
 
 # Readings that describe the consumption of a period (and therefore reset every
@@ -25,9 +31,14 @@ _PERIOD_VALUE_TYPES = {"DAY", "CONSUMPTION", "QUARTER_HOUR"}
 # Only devices with this state class may carry a `last_reset` attribute.
 _PERIOD_STATE_CLASS = SensorStateClass.TOTAL
 
+# Instantaneous power. Power is a measurement, not a counter, whatever the
+# provider's value type says.
+_POWER_UNIT = "W"
+
 _PROVIDER_PORTALS = {
     PROVIDER_WIENER_NETZE: ("Wiener Netze", "https://smartmeter-web.wienernetze.at/"),
     PROVIDER_NETZ_NOE: ("Netz Niederösterreich (EVN)", "https://smartmeter.netz-noe.at/"),
+    PROVIDER_ENERGYLIVE: ("smartENERGY", "https://www.smartenergy.at/energylive"),
 }
 
 
@@ -189,8 +200,14 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
         # Check if this is a known Energy Meter OBIS code
         is_known_energy_obis = self._obis_code in OBIS_NAMES
 
-        # FORCE Energy Configuration with Wh
-        if is_known_energy_obis or self._unit in ["kWh", "Wh"]:
+        if self._unit == _POWER_UNIT:
+            # Instantaneous power (W), read live from a meter. It is a
+            # measurement, so it must never be folded into energy statistics.
+            self._attr_device_class = SensorDeviceClass.POWER
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_native_unit_of_measurement = UnitOfPower.WATT
+        elif is_known_energy_obis or self._unit in ["kWh", "Wh"]:
+            # FORCE Energy Configuration with Wh
             self._attr_device_class = SensorDeviceClass.ENERGY
             self._attr_state_class = _state_class_for(obis_data)
 

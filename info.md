@@ -10,6 +10,7 @@ via their web portals.
 
 * ✅ **Wiener Netze**
 * ✅ **Netz Niederösterreich (EVN)**
+* ✅ **energyLIVE** (smartENERGY, API key)
 * 🚧 **Stromnetz Graz** (planned)
 
 **Requires Home Assistant 2026.9 or newer.**
@@ -37,6 +38,10 @@ adding new grid operators. The wiki also keeps the archived pre-2026.9 documenta
 
 This integration requires valid login credentials for your grid operator's web
 portal (e.g. the [Wiener Netze Smart Meter Portal](https://smartmeter-web.wienernetze.at/)).
+
+**energyLIVE** is meter reader hardware rather than a grid operator and is configured with
+an **API key** from the smartENERGY app or customer portal instead of a portal login. It
+reports cumulative meter readings (Wh) and the current power (W).
 
 ## 📚 Documentation
 

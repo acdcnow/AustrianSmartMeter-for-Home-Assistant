@@ -12,6 +12,7 @@
         "title": "Autenticación",
         "description": "Por favor, introduzca sus credenciales para **{provider_name}**.",
         "data": {
+          "api_key": "Clave de API",
           "username": "Nombre de usuario (Email)",
           "password": "Contraseña"
         }
@@ -19,7 +20,7 @@
     },
     "error": {
       "cannot_connect": "Conexión fallida. Por favor, compruebe su conexión a internet.",
-      "invalid_auth": "Autenticación fallida. Por favor, compruebe su usuario y contraseña.",
+      "invalid_auth": "Autenticación fallida. Por favor, compruebe sus credenciales.",
       "no_contracts": "No se encontraron puntos de suministro en esta cuenta.",
       "unknown": "Error inesperado."
     },

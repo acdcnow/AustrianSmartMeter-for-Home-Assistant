@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_API_KEY, CONF_PASSWORD, CONF_USERNAME
 
 DOMAIN = "asm"
 LOGGER = logging.getLogger(__package__)
@@ -14,11 +14,13 @@ CONF_PROVIDER = "provider"
 # Providers
 PROVIDER_WIENER_NETZE = "wiener_netze"
 PROVIDER_NETZ_NOE = "netz_noe"
+PROVIDER_ENERGYLIVE = "energylive"
 PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 
 PROVIDERS = {
     PROVIDER_WIENER_NETZE: "Wiener Netze",
     PROVIDER_NETZ_NOE: "Netz Niederösterreich (EVN)",
+    PROVIDER_ENERGYLIVE: "energyLIVE (smartENERGY)",
     # PROVIDER_STROMNETZ_GRAZ: "Stromnetz Graz", # In Entwicklung
 }
 
@@ -44,6 +46,7 @@ __all__ = [
     "ATTR_OBIS_CODE",
     "ATTR_UNIT",
     "ATTR_ZAEHLPUNKT",
+    "CONF_API_KEY",
     "CONF_PASSWORD",
     "CONF_PROVIDER",
     "CONF_SCAN_INTERVAL",
@@ -54,6 +57,7 @@ __all__ = [
     "MIN_SCAN_INTERVAL",
     "OBIS_NAMES",
     "PROVIDERS",
+    "PROVIDER_ENERGYLIVE",
     "PROVIDER_NETZ_NOE",
     "PROVIDER_STROMNETZ_GRAZ",
     "PROVIDER_WIENER_NETZE",
