@@ -23,6 +23,7 @@ and statistics.
 | **aWATTar market prices** | ✅ Supported | Price feed (EPEX day-ahead), not meter data. No account required |
 | **Selectra tariff planning** | ✅ Supported | Third-party tariff API, personal token required. Free tier: 60 calls/month |
 | **Salzburg Netz** | ✅ Supported | API key from the service portal + customer number. 15-minute load profiles |
+| **E-Werk Gösting** | 🚧 Preview | Web portal account (mein-portal.at). 15-minute consumption and production per Anlage. Not yet verified against the live portal |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
@@ -177,6 +178,55 @@ as an attribute next to the meter number and type from the API's device data.
 The `readings` (meter registers), `consumption` (billed amounts) and `partner` categories
 are not read yet.
 
+### E-Werk Gösting
+
+[E-Werk Gösting](https://www.ewg.at/kundenportal/) (E-Werk Gösting Stromversorgungs GmbH,
+Graz) shows its customers' consumption and production in a web portal,
+[goesting-dav.mein-portal.at](https://goesting-dav.mein-portal.at/bkp/login). This
+provider logs in to that portal and reads the same **15-minute values** that its
+**Zum Verbrauch / Erzeugung** page exports:
+
+1. Make sure you can log in to the customer portal in a browser - the integration uses
+   the same account.
+2. Add the integration and select **E-Werk Gösting**.
+3. Enter the **e-mail address** and **password** of the portal account.
+
+After a change of the portal password, remove the E-Werk Gösting entry under
+*Settings → Devices & Services* and add it again: the integration cannot ask for a new
+password yet.
+
+Every *Anlage* (facility) of the account becomes a device of its own: the portal lists
+them in the dropdown at the top left and identifies each by the ID next to **Anlage:**,
+which the device shows as its *Metering Point ID*. A device is named after the Anlage's
+address, or `Anlage <ID>` when the portal shows none, and gets a **Consumption 15 min**
+sensor (*Verbrauch*) plus - when the export carries production values - a
+**Production 15 min** sensor (*Erzeugung*). Both report the most recent 15-minute value
+in `Wh` with `state_class: total`, and carry the day's total of their register as the
+attribute `latest_day_total_wh`.
+
+The portal's 15-minute export only works for a period within **one calendar month**; a
+wider period breaks it. The integration therefore requests one calendar month per export
+and joins the answers. A poll reads yesterday and today, which is normally one export per
+Anlage. On the first day of a month, yesterday belongs to the previous month and is
+requested separately; once the portal has published all of yesterday, that month is not
+read again on the same day.
+
+> **This provider is a preview: it is not verified against the live portal.** The portal
+> could not be reached from the environment this provider was developed in, so the login,
+> the discovery of the Anlagen and the export are implemented from the portal's visible
+> behaviour (log in, pick the Anlage, **Home → Zum Verbrauch / Erzeugung**, one month,
+> **15 min**, export) rather than from a recorded session. The export itself is read
+> tolerantly - CSV or JSON, German or English column names, decimal comma or point, kWh
+> or Wh - but the way the portal is driven may well need adjusting.
+>
+> If the setup reports *Authentication failed* although the credentials work in a
+> browser, or *Connection failed*, or if a sensor stays without a value, enable debug
+> logging (see *Troubleshooting & Debugging* below) and
+> [open an issue](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues)
+> with the log. The log never contains the password, but it can contain short snippets of
+> the portal's pages and a description of their forms and links - check it for your
+> e-mail address and street address before you post it.
+
 ## ✨ Features
 
 * **Easy setup:** configuration directly through the Home Assistant UI (config flow).
@@ -245,6 +295,8 @@ Since this is a custom integration, add it as a **custom repository**:
    For **Salzburg Netz** enter the API key and customer number (GPNR) from the service
    portal; the metering points are optional.
    For **energiedaten.at** enter the **API key** of its dashboard as well.
+   For **E-Werk Gösting** enter the e-mail address and password of the customer portal
+   (mein-portal.at).
 6. Upon successful login, your meters will be added automatically.
 
 ### Options
@@ -311,6 +363,14 @@ something that was not JSON (for example an HTML error page). The debug log
 contains the HTTP status code and a snippet of the response.
 
 ## 📝 Changelog
+
+### Unreleased
+
+* **E-Werk Gösting** (preview) - the customer portal on mein-portal.at, read with the
+  portal account's e-mail address and password. Every Anlage of the account becomes a
+  device with 15-minute consumption and production values, requested one calendar month
+  at a time because the portal's 15-minute export only works within a month. Not verified
+  against the live portal yet; its section above says what to report when it fails.
 
 ### 1.2.0
 

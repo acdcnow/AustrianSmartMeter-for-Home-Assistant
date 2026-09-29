@@ -6,6 +6,7 @@ from .base import SmartmeterClient
 from .client_awattar import AwattarClient
 from .client_energiedaten import EnergiedatenAtClient
 from .client_energylive import EnergyliveClient
+from .client_goesting import EwerkGoestingClient
 from .client_noe import NetzNoeClient
 from .client_salzburgnetz import SalzburgNetzClient
 from .client_selectra import SelectraClient
@@ -27,6 +28,7 @@ from ..const import (
     PROVIDER_DSMR,
     PROVIDER_ENERGIEDATEN,
     PROVIDER_ENERGYLIVE,
+    PROVIDER_EWERK_GOESTING,
     PROVIDER_NETZ_NOE,
     PROVIDER_SALZBURGNETZ,
     PROVIDER_SELECTRA,
@@ -49,6 +51,9 @@ def get_client(
 
     if provider == PROVIDER_NETZ_NOE:
         return NetzNoeClient(data.get(CONF_USERNAME), data.get(CONF_PASSWORD))
+
+    if provider == PROVIDER_EWERK_GOESTING:
+        return EwerkGoestingClient(data.get(CONF_USERNAME), data.get(CONF_PASSWORD))
 
     if provider == PROVIDER_ENERGYLIVE:
         return EnergyliveClient(data.get(CONF_API_KEY))

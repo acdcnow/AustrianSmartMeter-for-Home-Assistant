@@ -24,6 +24,7 @@ from .const import (
     PROVIDER_DSMR,
     PROVIDER_ENERGIEDATEN,
     PROVIDER_ENERGYLIVE,
+    PROVIDER_EWERK_GOESTING,
     PROVIDER_NETZ_NOE,
     PROVIDER_WIENER_NETZE,
 )
@@ -52,6 +53,10 @@ _PROVIDER_PORTALS = {
         "Salzburg Netz",
         "https://www.salzburgnetz.at/service/serviceportal/"
         "programmierschnittstelle.html",
+    ),
+    PROVIDER_EWERK_GOESTING: (
+        "E-Werk Gösting",
+        "https://goesting-dav.mein-portal.at/bkp/login",
     ),
 }
 
