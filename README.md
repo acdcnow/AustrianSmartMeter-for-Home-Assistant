@@ -23,7 +23,7 @@ and statistics.
 | **aWATTar market prices** | ✅ Supported | Price feed (EPEX day-ahead), not meter data. No account required |
 | **Selectra tariff planning** | ✅ Supported | Third-party tariff API, personal token required. Free tier: 60 calls/month |
 | **Salzburg Netz** | ✅ Supported | API key from the service portal + customer number. 15-minute load profiles |
-| **E-Werk Gösting** | 🚧 Preview | Web portal account (mein-portal.at). 15-minute consumption and production per Anlage. Not yet verified against the live portal |
+| **E-Werk Gösting** | ✅ Supported | Web portal account (mein-portal.at). 15-minute consumption and production per Anlage |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
@@ -184,7 +184,7 @@ are not read yet.
 Graz) shows its customers' consumption and production in a web portal,
 [goesting-dav.mein-portal.at](https://goesting-dav.mein-portal.at/bkp/login). This
 provider logs in to that portal and reads the same **15-minute values** that its
-**Zum Verbrauch / Erzeugung** page exports:
+**Zum Verbrauch / Erzeugung** page shows and exports:
 
 1. Make sure you can log in to the customer portal in a browser - the integration uses
    the same account.
@@ -195,37 +195,61 @@ After a change of the portal password, remove the E-Werk Gösting entry under
 *Settings → Devices & Services* and add it again: the integration cannot ask for a new
 password yet.
 
-Every *Anlage* (facility) of the account becomes a device of its own: the portal lists
-them in the dropdown at the top left and identifies each by the ID next to **Anlage:**,
-which the device shows as its *Metering Point ID*. A device is named after the Anlage's
-address, or `Anlage <ID>` when the portal shows none, and gets a **Consumption 15 min**
-sensor (*Verbrauch*) plus - when the export carries production values - a
-**Production 15 min** sensor (*Erzeugung*). Both report the most recent 15-minute value
-in `Wh` with `state_class: total`, and carry the day's total of their register as the
-attribute `latest_day_total_wh`.
+Every active *Anlage* (facility) of the account becomes a device of its own; Anlagen
+whose contract has ended are left out. A device is identified by the Anlage's
+Zählpunkt, which it shows as its *Metering Point ID*, and named after the address plus
+the Anlagennummer, e.g. `Musterstraße 1/2 (Anlage 20001234)`, so that two Anlagen at one
+address stay apart. Each device gets a **Consumption 15 min** sensor (*Verbrauch
+(gemessen)*) and, when the portal reports feed-in, a **Production 15 min** sensor
+(*Lieferung (gemessen)*). Both report the most recent 15-minute value in `Wh` with
+`state_class: total`, and carry the day's total of their register as the attribute
+`latest_day_total_wh`. **Consumption Yesterday** and **Consumption Day Before
+Yesterday** add up the quarter hours of those days; their attribute `validated` becomes
+true once a day is complete (96 quarter hours, 92 or 100 on the days of the DST
+switches) and all its values are measured values. The meter's serial number, the
+contract, the load profile and the address appear as device details, diagnostic
+entities and attributes.
 
-The portal's 15-minute export only works for a period within **one calendar month**; a
-wider period breaks it. The integration therefore requests one calendar month per export
-and joins the answers. A poll reads yesterday and today, which is normally one export per
-Anlage. On the first day of a month, yesterday belongs to the previous month and is
-requested separately; once the portal has published all of yesterday, that month is not
-read again on the same day.
+Production values follow the portal's channel naming (*Lieferung (gemessen)*, channel
+`1-1:2.9.0 G.01`) but have not been verified with a feed-in Anlage yet. Only the
+measured channels are read: the channels of an energy community (*Energiegemeinschaft*)
+and the other shares the portal may list are not, and the log names them once at INFO
+level.
 
-> **This provider is a preview: it is not verified against the live portal.** The portal
-> could not be reached from the environment this provider was developed in, so the login,
-> the discovery of the Anlagen and the export are implemented from the portal's visible
-> behaviour (log in, pick the Anlage, **Home → Zum Verbrauch / Erzeugung**, one month,
-> **15 min**, export) rather than from a recorded session. The export itself is read
-> tolerantly - CSV or JSON, German or English column names, decimal comma or point, kWh
-> or Wh - but the way the portal is driven may well need adjusting.
->
-> If the setup reports *Authentication failed* although the credentials work in a
-> browser, or *Connection failed*, or if a sensor stays without a value, enable debug
-> logging (see *Troubleshooting & Debugging* below) and
+The values are exactly the portal's: its export button builds the `.xlsx` file in the
+browser from the very data this integration reads. This was checked quarter hour by
+quarter hour against the live portal, and verified on payloads captured from the live
+portal for both DST days. A timestamp is the **end** of its 15-minute interval in
+Europe/Vienna time - `2026-08-01T00:15:00+02:00` is the quarter hour from 00:00 to
+00:15 - and a value counts towards the day in which its interval starts.
+
+The portal publishes a day's values **once a day**: today's values are never there yet,
+and yesterday's can arrive late. A poll therefore reads the last three days (the day
+before yesterday, yesterday and today), one request per Anlage, so that the sensors have
+a value even while yesterday is still missing. The portal serves 15-minute values only
+while a request spans at most **30 days** between the midnight of its first and the
+midnight of its last day - beyond that it silently answers daily values. A 31-day month
+therefore fits into one request, while the month of the autumn DST switch (30 days and
+one hour) takes two, and a longer period is read in as many requests as it needs.
+
+> **Troubleshooting.** *Authentication failed* during the setup means that the portal
+> rejected the e-mail address or password - check them in a browser. *Connection
+> failed*, with the log message
+> "The E-Werk Gösting portal did not accept its login action", means that the portal
+> is down or was updated in a way the integration cannot follow by itself (it looks
+> the login up again after a portal update; this message appears when that fails) -
+> try again later, and please
 > [open an issue](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues)
-> with the log. The log never contains the password, but it can contain short snippets of
-> the portal's pages and a description of their forms and links - check it for your
-> e-mail address and street address before you post it.
+> if it persists. Any other *Connection failed* means that the portal could not be
+> reached, answered with an error page, or reported a problem of its own
+> ("The E-Werk Gösting portal could not log in"); the log names the address, the HTTP
+> status and the content type, or the portal's message. An Anlage for which the portal
+> names no Zählpunkt is left out, with a warning in the log.
+>
+> Enable debug logging (see *Troubleshooting & Debugging* below) before you report a
+> problem. The log never contains the password or the portal's session cookies, but it
+> does contain your Anlage and Zählpunkt numbers and can contain your e-mail and street
+> address - check it before you post it.
 
 ## ✨ Features
 
@@ -366,11 +390,15 @@ contains the HTTP status code and a snippet of the response.
 
 ### Unreleased
 
-* **E-Werk Gösting** (preview) - the customer portal on mein-portal.at, read with the
-  portal account's e-mail address and password. Every Anlage of the account becomes a
-  device with 15-minute consumption and production values, requested one calendar month
-  at a time because the portal's 15-minute export only works within a month. Not verified
-  against the live portal yet; its section above says what to report when it fails.
+* **E-Werk Gösting** - the customer portal on mein-portal.at, read with the portal
+  account's e-mail address and password. Every active Anlage of the account becomes a
+  device with its 15-minute consumption in Wh and the consumption of yesterday and the
+  day before; production (feed-in) values follow the portal's channel naming but have
+  not been verified with a feed-in Anlage yet. The values are the data behind the
+  portal's own export: against the live portal, the integration reads the same quarter
+  hours with the same values as the portal's `.xlsx` export, and this was verified on
+  payloads captured from the live portal for both DST days. Energy-community channels
+  are not read. A portal update that changes the login is followed automatically.
 
 ### 1.2.0
 

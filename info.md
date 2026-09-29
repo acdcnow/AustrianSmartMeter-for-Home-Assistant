@@ -16,7 +16,7 @@ via their web portals.
 * ✅ **aWATTar market prices** (public EPEX price feed, no account)
 * ✅ **Selectra tariff planning** (third-party tariff API, personal token, 60 calls/month free)
 * ✅ **Salzburg Netz** (service portal API key, 15-minute load profiles)
-* 🚧 **E-Werk Gösting** (customer portal login, 15-minute values, preview)
+* ✅ **E-Werk Gösting** (customer portal login, 15-minute values)
 * 🚧 **Stromnetz Graz** (planned)
 
 **Requires Home Assistant 2026.9 or newer.**
@@ -57,8 +57,8 @@ commercial third-party API with a personal token and a free tier of 60 calls per
 login of the other grid operators. It reports the 15-minute load profile of a metering point.
 
 **E-Werk Gösting** is read through its customer portal (mein-portal.at) with the portal's
-e-mail address and password, one device per Anlage (facility) with 15-minute consumption
-and production; it is a preview that has not been verified against the live portal yet.
+e-mail address and password: one device per active Anlage (facility) with its 15-minute
+consumption and production - the same values the portal's own export contains.
 
 **energiedaten.at** is a data platform rather than a grid operator and is configured
 with an **API key** (*Integrations → API Keys* in its dashboard, scopes
