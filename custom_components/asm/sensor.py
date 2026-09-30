@@ -37,6 +37,15 @@ _PERIOD_VALUE_TYPES = {"DAY", "CONSUMPTION", "QUARTER_HOUR"}
 # Only devices with this state class may carry a `last_reset` attribute.
 _PERIOD_STATE_CLASS = SensorStateClass.TOTAL
 
+# Keys of the latest entry of a reading that are not repeated as latest_<key>
+# attributes.
+_LATEST_SKIPPED = frozenset(
+    {"messwert", "value", "amount", "qualitaet", "status", "validated"}
+)
+# The entries of a reading that carries a statistic_id are the totals of whole
+# days; whether the latest day is validated (complete and measured) is kept.
+_LATEST_SKIPPED_STATISTIC = _LATEST_SKIPPED - {"validated"}
+
 # Instantaneous power. Power is a measurement, not a counter, whatever the
 # provider's value type says.
 _POWER_UNIT = "W"
@@ -243,6 +252,13 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             self._attr_native_unit_of_measurement = self._unit
             self._attr_state_class = SensorStateClass.MEASUREMENT
 
+        if obis_data.get("statistic_id"):
+            # The provider's values reach the long-term statistics under this
+            # statistic_id, with their real timestamps (statistics.py).
+            # Statistics compiled from the entity's state would record them at
+            # poll time, so the entity has no state class.
+            self._attr_state_class = None
+
         # Naming
         meter_name = _get_clean_meter_name(info)
         self._attr_name = f"{meter_name} {readable_obis}"
@@ -304,6 +320,11 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             "obis_code": self._obis_code,
             "raw_unit": data.get("einheit") or "Wh (assumed)",
         }
+        statistic_id = data.get("statistic_id")
+        if statistic_id:
+            attributes["statistic_id"] = statistic_id
+            if data.get("history_start"):
+                attributes["history_start"] = data["history_start"]
 
         info = self.coordinator.data.get(self._zaehlpunkt, {}).get("info", {})
         for key, value in info.items():
@@ -326,8 +347,9 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             )
             attributes["validation_status"] = latest.get("qualitaet") or latest.get("status")
 
+            skipped = _LATEST_SKIPPED_STATISTIC if statistic_id else _LATEST_SKIPPED
             for key, value in latest.items():
-                if key not in ["messwert", "value", "amount", "qualitaet", "status", "validated"]:
+                if key not in skipped:
                     attributes[f"latest_{key}"] = value
         return attributes
 
@@ -370,8 +392,13 @@ class AustriaSmartMeterStatistic(
         self._attr_name = f"{meter_name} {name_suffix}"
         self._attr_unique_id = f"{zaehlpunkt}_stat_{key_id}"
         self._attr_device_class = SensorDeviceClass.ENERGY
-        # Daily values, not a cumulative meter reading.
-        self._attr_state_class = _PERIOD_STATE_CLASS
+        # Daily values, not a cumulative meter reading. A provider that imports
+        # the consumption into long-term statistics (statistic_id) records it
+        # with its real timestamps; the entity then compiles no statistics.
+        stats = coordinator.data.get(zaehlpunkt, {}).get("stats", {})
+        self._attr_state_class = (
+            None if (stats or {}).get("statistic_id") else _PERIOD_STATE_CLASS
+        )
         self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
         self._attr_device_info = _get_shared_device_info(
             zaehlpunkt, info, coordinator.provider
@@ -393,10 +420,13 @@ class AustriaSmartMeterStatistic(
         data = (stats or {}).get(self._key_id)
         if not data:
             return {}
-        return {
+        attributes = {
             "date": data.get("date"),
             "validated": data.get("validated"),
         }
+        if statistic_id := (stats or {}).get("statistic_id"):
+            attributes["statistic_id"] = statistic_id
+        return attributes
 
 
 def _state_class_for(obis_data: dict[str, Any]) -> SensorStateClass:

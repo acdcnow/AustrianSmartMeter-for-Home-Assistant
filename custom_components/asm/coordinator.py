@@ -1,11 +1,12 @@
 """DataUpdateCoordinator for Austria Smartmeter."""
 from __future__ import annotations
 
-from datetime import timedelta
+import asyncio
+from datetime import date, timedelta
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -20,6 +21,7 @@ from .const import (
     MIN_SCAN_INTERVAL,
     PROVIDER_WIENER_NETZE,
 )
+from .statistics import StatisticsImporter, statistic_readings
 
 
 class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -30,51 +32,34 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.provider: str = entry.data.get(CONF_PROVIDER, PROVIDER_WIENER_NETZE)
         # Every provider reads what it needs out of the entry data.
         self.client = get_client(self.provider, entry.data)
+        self._entry = entry
+        # A client is synchronous and holds one portal session: a poll and a
+        # statistics import take turns with it.
+        self._client_lock = asyncio.Lock()
+        # Imports the readings that carry a statistic_id into the long-term
+        # statistics, in the background (statistics.py).
+        self._statistics = StatisticsImporter(hass, self._async_read_history)
+        self._shut_down = False
 
         super().__init__(
             hass,
             LOGGER,
+            # Passed explicitly: the entry's unload calls async_shutdown.
+            config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(minutes=_scan_interval(entry)),
         )
 
+    async def async_shutdown(self) -> None:
+        """Cancel any scheduled call, ignore new runs, and start no import."""
+        self._shut_down = True
+        await super().async_shutdown()
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the provider portal."""
         try:
-            if not self.client.is_logged_in() or self.client.is_login_expired():
-                await self.hass.async_add_executor_job(self.client.login)
-
-            contracts = await self.hass.async_add_executor_job(self.client.zaehlpunkte)
-            consumption_stats = await self._async_consumption_stats()
-
-            data: dict[str, Any] = {}
-            for contract in contracts:
-                zaehlpunkte = contract.get("zaehlpunkte") or []
-                for zp_info in zaehlpunkte:
-                    zp_num = zp_info.get("zaehlpunktnummer")
-                    if not zp_num:
-                        continue
-
-                    data[zp_num] = {"info": zp_info, "readings": [], "stats": {}}
-                    data[zp_num]["stats"] = _match_stats(
-                        consumption_stats, zp_num, len(contracts), len(zaehlpunkte)
-                    )
-
-                    try:
-                        data[zp_num]["readings"] = (
-                            await self.hass.async_add_executor_job(
-                                lambda zp=zp_num: self.client.historical_data(
-                                    zaehlpunktnummer=zp
-                                )
-                            )
-                        )
-                    except SmartmeterError as err:
-                        LOGGER.warning(
-                            "Could not fetch historic data for %s: %s", zp_num, err
-                        )
-
-            return data
-
+            async with self._client_lock:
+                data = await self._async_read_portal()
         except SmartmeterLoginError as err:
             raise ConfigEntryAuthFailed from err
         except SmartmeterError as err:
@@ -82,6 +67,86 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # noqa: BLE001
             LOGGER.exception("Unexpected error during update")
             raise UpdateFailed(f"Unexpected error: {err}") from err
+
+        self._async_start_statistics_import(data)
+        return data
+
+    async def _async_read_portal(self) -> dict[str, Any]:
+        """Read the metering points with their statistics and readings."""
+        if not self.client.is_logged_in() or self.client.is_login_expired():
+            await self.hass.async_add_executor_job(self.client.login)
+
+        contracts = await self.hass.async_add_executor_job(self.client.zaehlpunkte)
+        consumption_stats = await self._async_consumption_stats()
+
+        data: dict[str, Any] = {}
+        for contract in contracts:
+            zaehlpunkte = contract.get("zaehlpunkte") or []
+            for zp_info in zaehlpunkte:
+                zp_num = zp_info.get("zaehlpunktnummer")
+                if not zp_num:
+                    continue
+
+                data[zp_num] = {"info": zp_info, "readings": [], "stats": {}}
+                data[zp_num]["stats"] = _match_stats(
+                    consumption_stats, zp_num, len(contracts), len(zaehlpunkte)
+                )
+
+                try:
+                    data[zp_num]["readings"] = (
+                        await self.hass.async_add_executor_job(
+                            lambda zp=zp_num: self.client.historical_data(
+                                zaehlpunktnummer=zp
+                            )
+                        )
+                    )
+                except SmartmeterError as err:
+                    LOGGER.warning(
+                        "Could not fetch historic data for %s: %s", zp_num, err
+                    )
+
+        return data
+
+    @callback
+    def _async_start_statistics_import(self, data: dict[str, Any]) -> None:
+        """Import the poll's statistic readings in the background.
+
+        The entities are updated without waiting for it: the first import reads
+        the whole history. An import never overlaps another one.
+        """
+        # A refresh that finishes while the entry unloads, or after it - also when
+        # a reload has set the entry up again with a new coordinator - must not
+        # start an import: nothing would cancel it any more, and it would run
+        # next to the new coordinator's.
+        if self._shut_down or self._entry.state not in (
+            ConfigEntryState.SETUP_IN_PROGRESS,
+            ConfigEntryState.LOADED,
+        ):
+            return
+        if not any(statistic_readings(data)):
+            return
+        if self._statistics.running:
+            LOGGER.debug(
+                "The statistics import of an earlier poll is still running; this "
+                "poll's import is skipped"
+            )
+            return
+        # Not started eagerly: the import begins after this poll has returned.
+        self._entry.async_create_background_task(
+            self.hass,
+            self._statistics.async_import(data),
+            name="asm statistics import",
+            eager_start=False,
+        )
+
+    async def _async_read_history(
+        self, zaehlpunkt: str, first: date, last: date
+    ) -> list[dict[str, Any]]:
+        """Read the readings of a metering point for the days first to last."""
+        async with self._client_lock:
+            return await self.hass.async_add_executor_job(
+                self.client.historical_data, zaehlpunkt, first, last
+            )
 
     async def _async_consumption_stats(self) -> list[dict[str, Any]]:
         """Fetch the ready made consumption statistics, if the provider has any."""

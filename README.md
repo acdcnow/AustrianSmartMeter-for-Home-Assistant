@@ -199,16 +199,19 @@ Every active *Anlage* (facility) of the account becomes a device of its own; Anl
 whose contract has ended are left out. A device is identified by the Anlage's
 Zählpunkt, which it shows as its *Metering Point ID*, and named after the address plus
 the Anlagennummer, e.g. `Musterstraße 1/2 (Anlage 20001234)`, so that two Anlagen at one
-address stay apart. Each device gets a **Consumption 15 min** sensor (*Verbrauch
-(gemessen)*) and, when the portal reports feed-in, a **Production 15 min** sensor
-(*Lieferung (gemessen)*). Both report the most recent 15-minute value in `Wh` with
-`state_class: total`, and carry the day's total of their register as the attribute
-`latest_day_total_wh`. **Consumption Yesterday** and **Consumption Day Before
-Yesterday** add up the quarter hours of those days; their attribute `validated` becomes
-true once a day is complete (96 quarter hours, 92 or 100 on the days of the DST
-switches) and all its values are measured values. The meter's serial number, the
-contract, the load profile and the address appear as device details, diagnostic
-entities and attributes.
+address stay apart. Each device gets a **Daily Consumption** sensor (*Verbrauch
+(gemessen)*) and, when the portal reports feed-in, a **Daily Production** sensor
+(*Lieferung (gemessen)*). Both show the total in `Wh` of the latest complete day that
+the portal has published (96 quarter hours, 92 or 100 on the days of the DST switches).
+Their attributes are the day (`last_reading_date`), `latest_validated` (true when all
+its values are measured values), `latest_intervals`, the `statistic_id` of the
+long-term statistic below and `history_start` (the contract start). **Consumption
+Yesterday** and **Consumption Day Before Yesterday** add up the quarter hours of those
+days; their attribute `validated` becomes true once a day is complete and all its values
+are measured values. None of these sensors has a `state_class`, on purpose: the values
+reach Home Assistant's statistics with their real timestamps instead (see below). The
+meter's serial number, the contract, the load profile and the address appear as device
+details, diagnostic entities and attributes.
 
 Production values follow the portal's channel naming (*Lieferung (gemessen)*, channel
 `1-1:2.9.0 G.01`) but have not been verified with a feed-in Anlage yet. Only the
@@ -223,14 +226,57 @@ portal for both DST days. A timestamp is the **end** of its 15-minute interval i
 Europe/Vienna time - `2026-08-01T00:15:00+02:00` is the quarter hour from 00:00 to
 00:15 - and a value counts towards the day in which its interval starts.
 
-The portal publishes a day's values **once a day**: today's values are never there yet,
-and yesterday's can arrive late. A poll therefore reads the last three days (the day
-before yesterday, yesterday and today), one request per Anlage, so that the sensors have
-a value even while yesterday is still missing. The portal serves 15-minute values only
-while a request spans at most **30 days** between the midnight of its first and the
-midnight of its last day - beyond that it silently answers daily values. A 31-day month
-therefore fits into one request, while the month of the autumn DST switch (30 days and
-one hour) takes two, and a longer period is read in as many requests as it needs.
+The portal publishes a day's values on the **next day**, by 12:00 at the latest and
+usually earlier: today's values are never there yet, and yesterday's can arrive late. A
+poll therefore reads the last three days (the day before yesterday, yesterday and
+today), one request per Anlage, so that the sensors show a complete day even while
+yesterday is still missing. The portal serves 15-minute values only while a request
+spans at most **30 days** between the midnight of its first and the midnight of its last
+day - beyond that it silently answers daily values. A 31-day month therefore fits into
+one request, while the month of the autumn DST switch (30 days and one hour) takes two,
+and a longer period is read in as many requests as it needs.
+
+#### Energy dashboard and long-term statistics
+
+A sensor's state is recorded at the moment it is polled, so statistics compiled from it
+would put values that the portal publishes a day late at the wrong time - and they could
+not hold the history that the portal already has. The integration therefore writes the
+values into Home Assistant's **long-term statistics** with their real timestamps. They
+are hourly, because Home Assistant's long-term statistics are: the four quarter hours of
+an hour are summed, and a quarter hour counts towards the hour in which it starts. Each
+Anlage has a statistic named after its device, **`<device> Consumption`** (statistic ID
+`asm:<Zählpunkt>_consumption`, e.g. `asm:at0082100000000000000000000012345_consumption`),
+and **`<device> Production`** when it feeds in.
+
+* In *Settings → Dashboards → Energy*, pick **`<device> Consumption`** as grid
+  consumption. It is a statistic, not the sensor entity, and the picker lists it by its
+  name. The *Statistics graph* card can chart it too. Home Assistant cannot attach a
+  fixed price or a price entity to an external statistic like `asm:…_consumption` (the
+  Energy dashboard rejects it), so its costs cannot be tracked there at the moment.
+* On the first poll, the **whole available history** is imported, from the contract
+  start on: a few dozen portal requests, once. For the account this provider was
+  developed with, the data starts on 2025-02-27, and the months before it are empty. The
+  import runs in the background - the sensors are updated right away - and logs one line
+  per statistic at INFO level when it is done.
+* Later polls add the new hours only, usually a day at a time. After Home Assistant was
+  off for a while, the missing days are read as well. Quarter hours that the portal
+  marks as estimated (substitute values) are imported as the portal reports them, and
+  they are not corrected later.
+* An hour that the portal has not delivered holds the import back, because the portal
+  may still deliver it. Once newer values have existed for more than 7 days, the gap is
+  skipped, with a warning in the log that names it ("so this gap is skipped").
+
+**Updating from the preview?** Three sensors per Anlage - four with feed-in - had
+`state_class: total`, so Home Assistant compiled statistics from their states at poll
+time, and they lose their state class now: **Daily Consumption** (the former
+**Consumption 15 min**), **Consumption Yesterday**, **Consumption Day Before Yesterday**
+and, with feed-in, **Daily Production** (the former **Production 15 min**). For each of
+them Home Assistant reports that it "no longer has a state class" (*Settings →
+Repairs*); their old statistics can be cleared in *Developer tools → Statistics*. The
+renamed sensors keep their entity IDs, e.g. `sensor.…_consumption_15_min`: Home
+Assistant never renames an entity ID, but it can be changed in the entity's settings.
+If one of these sensors was selected in the Energy dashboard, replace it with the
+`<device> Consumption` statistic.
 
 > **Troubleshooting.** *Authentication failed* during the setup means that the portal
 > rejected the e-mail address or password - check them in a browser. *Connection
@@ -244,7 +290,11 @@ one hour) takes two, and a longer period is read in as many requests as it needs
 > reached, answered with an error page, or reported a problem of its own
 > ("The E-Werk Gösting portal could not log in"); the log names the address, the HTTP
 > status and the content type, or the portal's message. An Anlage for which the portal
-> names no Zählpunkt is left out, with a warning in the log.
+> names no Zählpunkt is left out, with a warning in the log. When the statistics import
+> "could not read" a month of history - also when the portal answered it with "daily
+> value(s) instead of 15-minute values" - it stops there and goes on with the next
+> poll. A register whose values the client cannot read (it says so with "the portal's
+> values could not be read") is not imported either, and nothing is skipped over it.
 >
 > Enable debug logging (see *Troubleshooting & Debugging* below) before you report a
 > problem. The log never contains the password or the portal's session cookies, but it
@@ -257,6 +307,7 @@ one hour) takes two, and a longer period is read in as many requests as it needs
 * **Multi metering point support:** supports accounts with several metering points/addresses.
 * **Automatic detection:** detects consumption (1.8.0) and production/feed-in (2.8.0).
 * **Statistics:** daily consumption statistics ("Consumption Yesterday", "Consumption Day Before Yesterday") where the portal provides them.
+* **Long-term statistics with real timestamps:** values that a portal publishes a day late (E-Werk Gösting) go into Home Assistant's long-term statistics hour by hour, with their history, for the Energy dashboard.
 * **Diagnostics:** detailed technical information exposed as diagnostic entities:
     * Full address (street, city, ZIP)
     * Facility type (e.g. consumption/feed-in)
@@ -348,6 +399,10 @@ Netz Niederösterreich only exposes the **consumption of a period**, not the
 cumulative meter reading, so that provider gets a `Daily Consumption` sensor
 instead (also in Wh, `state_class: total`).
 
+E-Werk Gösting gets a `Daily Consumption` sensor as well, but without a state class:
+its values reach the long-term statistics with their real timestamps, as the statistic
+`<device> Consumption` that its Energy dashboard uses (see *E-Werk Gösting* above).
+
 ### Statistics
 
 * `sensor.<meter>_consumption_yesterday`
@@ -392,13 +447,21 @@ contains the HTTP status code and a snippet of the response.
 
 * **E-Werk Gösting** - the customer portal on mein-portal.at, read with the portal
   account's e-mail address and password. Every active Anlage of the account becomes a
-  device with its 15-minute consumption in Wh and the consumption of yesterday and the
-  day before; production (feed-in) values follow the portal's channel naming but have
-  not been verified with a feed-in Anlage yet. The values are the data behind the
-  portal's own export: against the live portal, the integration reads the same quarter
-  hours with the same values as the portal's `.xlsx` export, and this was verified on
-  payloads captured from the live portal for both DST days. Energy-community channels
-  are not read. A portal update that changes the login is followed automatically.
+  device with the consumption of the latest published day, of yesterday and of the day
+  before, in Wh. The portal publishes a day's values on the next day, so the 15-minute
+  values go into Home Assistant's long-term statistics with their real timestamps:
+  hourly, as the statistic `<device> Consumption` for the Energy dashboard, with the
+  whole history from the contract start on the first poll. Production (feed-in) values
+  follow the portal's channel naming but have not been verified with a feed-in Anlage
+  yet. The values are the data behind the portal's own export: against the live
+  portal, the integration reads the same quarter hours with the same values as the
+  portal's `.xlsx` export, and this was verified on payloads captured from the live
+  portal for both DST days. Energy-community channels are not read. A portal update
+  that changes the login is followed automatically.
+* **Long-term statistics for late data** - readings that carry a statistic ID are
+  imported into the recorder as external statistics (`asm:…`) with their real
+  timestamps, and their sensors compile no statistics of their own. The manifest lists
+  the recorder as an after-dependency.
 
 ### 1.2.0
 

@@ -43,8 +43,20 @@ against the live portal on 2026-09-29:
   repeats appears twice, with ``+02:00`` and ``+01:00``. A value belongs to the
   day its interval starts in. ``level`` L1 and L2 are measured values, L3
   substitute values.
-* A day's values are published once a day: today's are missing, and yesterday's
-  can arrive late.
+* A day's values are published on the next day, by 12:00 at the latest and
+  usually earlier: today's are missing, and yesterday's can arrive late.
+
+A reading per register (consumption, and production when the portal reports it)
+therefore carries two views of what was read. Its ``messwerte`` are the totals of
+the complete Vienna days, oldest first, and the entity shows the latest one. Its
+``intervals`` are the quarter hours themselves with their real timestamps, which
+statistics.py sums per hour into Home Assistant's long-term statistics: the
+external statistic ``statistic_id`` (``asm:<Zählpunkt>_consumption``), which is
+what the Energy dashboard uses. Its first import reads the whole history from
+``history_start``, the contract start. Nothing that went wrong may look like a
+period without values there: a window that the portal answers with daily values is
+an error, and a register that cannot be read keeps its reading, without values and
+with the reason as ``error``.
 """
 from __future__ import annotations
 
@@ -104,9 +116,15 @@ PERIOD_CACHE_MAX_AGE = timedelta(minutes=10)
 OBIS_CONSUMPTION = "1-1:1.9.0"
 OBIS_PRODUCTION = "1-1:2.9.0"
 
-# sensor.py reports this value type as a period value (state_class total).
-VALUE_TYPE = "QUARTER_HOUR"
+# The entity of a reading shows the total of a day. Its values reach the
+# long-term statistics through the statistic_id, not through a state class (see
+# sensor.py and statistics.py).
+VALUE_TYPE = "DAY"
 UNIT_WH = "Wh"
+
+# The long-term statistics of an Anlage are external statistics of the
+# integration's domain, "asm:<Zählpunkt>_consumption" (statistics.py).
+STATISTIC_SOURCE = "asm"
 
 # The portal reports kWh, the entities are fed Wh.
 KWH_TO_WH = 1000
@@ -122,10 +140,20 @@ USER_AGENT = (
     "(+https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant)"
 )
 
+
+class _Register(NamedTuple):
+    """A register of an Anlage and the names it has in Home Assistant."""
+
+    obis: str
+    name: str  # the entity, which shows the total of the latest complete day
+    statistic: str  # the end of the statistic_id
+    label: str  # the statistic's name, after the device name
+
+
 # The readings of an Anlage, in this order.
 _REGISTERS = (
-    (OBIS_CONSUMPTION, "Consumption 15 min"),
-    (OBIS_PRODUCTION, "Production 15 min"),
+    _Register(OBIS_CONSUMPTION, "Daily Consumption", "consumption", "Consumption"),
+    _Register(OBIS_PRODUCTION, "Daily Production", "production", "Production"),
 )
 
 # A register is read from its measured channel only ("Verbrauch (gemessen)",
@@ -181,6 +209,13 @@ class _Value(NamedTuple):
     wh: float
     status: str
     day: date  # the Europe/Vienna day the interval starts in
+
+
+class _Registers(NamedTuple):
+    """The values of an Anlage's registers, and why a register was not read."""
+
+    values: dict[str, list[_Value]]  # OBIS code -> values, oldest first
+    errors: dict[str, str]  # OBIS code -> the reason the register was not read
 
 
 class _SessionLost(SmartmeterConnectionError):
@@ -406,9 +441,14 @@ def _parse_stamp(value: Any) -> datetime | None:
     return stamp if stamp.utcoffset() is not None else None
 
 
+def _interval_start(instant: datetime) -> datetime:
+    """Return the start of the interval ending at ``instant``, in Vienna time."""
+    return (instant - timedelta(minutes=INTERVAL_MINUTES)).astimezone(VIENNA)
+
+
 def _start_day(instant: datetime) -> date:
     """Return the Vienna day in which the interval ending at ``instant`` starts."""
-    return (instant - timedelta(minutes=INTERVAL_MINUTES)).astimezone(VIENNA).date()
+    return _interval_start(instant).date()
 
 
 # -------------------------------------------------------------------- values
@@ -466,37 +506,92 @@ def _channel_values(
     return values
 
 
-def _readings(registers: dict[str, list[_Value]]) -> list[dict[str, Any]]:
+def _statistic_id(zaehlpunkt: str, register: str) -> str:
+    """Return the id of a register's long-term statistic.
+
+    The Zählpunkt in lower case, with every run of characters other than a-z and
+    0-9 turned into one underscore, e.g.
+    ``asm:at0082100000000000000000000012345_consumption``.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", zaehlpunkt.lower()).strip("_")
+    return f"{STATISTIC_SOURCE}:{slug}_{register}"
+
+
+def _day_totals(values: list[_Value]) -> list[dict[str, Any]]:
+    """Return the totals of the complete days among ``values``, oldest first.
+
+    A day is complete when all its quarter hours are there (96, or 92 and 100 on
+    the days of the DST switches): the total of an incomplete day would be a
+    wrong number. A day is validated when every quarter hour is a measured value.
+    """
+    days: dict[date, list[_Value]] = {}
+    for value in values:
+        days.setdefault(value.day, []).append(value)
+    totals: list[dict[str, Any]] = []
+    for day in sorted(days):
+        of_day = days[day]
+        if len(of_day) != _intervals_in(day):
+            continue
+        statuses = {value.status for value in of_day}
+        if statuses == {"VALID"}:
+            status = "VALID"
+        elif "ESTIMATED" in statuses:
+            status = "ESTIMATED"
+        else:
+            status = "UNKNOWN"
+        totals.append({
+            "zeitpunkt": _midnight(day).astimezone(VIENNA).isoformat(),
+            "messwert": _round(sum(value.wh for value in of_day)),
+            "status": status,
+            "validated": status == "VALID",
+            "intervals": len(of_day),
+        })
+    return totals
+
+
+def _readings(
+    registers: _Registers, zaehlpunkt: str, name: str, history_start: date | None
+) -> list[dict[str, Any]]:
     """Turn register values into the readings contract of sensor.py.
 
-    One reading per register with values, consumption first; ``day_total_wh`` is
-    the register's total on the day in which the value's interval starts.
+    One reading per register with values, consumption first. Its ``messwerte``
+    are the totals of the complete days (the entity shows the latest one), its
+    ``intervals`` every quarter hour read, for the long-term statistic
+    ``statistic_id`` (statistics.py). ``history_start`` is the first day worth
+    reading, ``name`` the device name. A register that was not read (wrong unit,
+    values off the 15-minute grid) keeps its reading, without values and with the
+    reason as ``error``: for the statistics, that is no period without values.
     """
     readings: list[dict[str, Any]] = []
-    for obis, name in _REGISTERS:
-        values = registers.get(obis)
-        if not values:
+    for register in _REGISTERS:
+        values = registers.values.get(register.obis) or []
+        error = registers.errors.get(register.obis)
+        if not values and not error:
             continue
-        totals: dict[date, float] = {}
-        for value in values:
-            totals[value.day] = totals.get(value.day, 0.0) + value.wh
-        readings.append({
-            "obisCode": obis,
-            "name": name,
+        reading: dict[str, Any] = {
+            "obisCode": register.obis,
+            "name": register.name,
             "wertetyp": VALUE_TYPE,
             "einheit": UNIT_WH,
+            "statistic_id": _statistic_id(zaehlpunkt, register.statistic),
+            "statistic_name": f"{name} {register.label}",
+            "history_start": history_start.isoformat() if history_start else None,
             "interval_minutes": INTERVAL_MINUTES,
             "records_read": len(values),
-            "messwerte": [
+            "messwerte": _day_totals(values),
+            "intervals": [
                 {
-                    "zeitpunkt": value.stamp,
-                    "messwert": value.wh,
+                    "start": _interval_start(value.instant).isoformat(),
+                    "end": value.stamp,
+                    "wh": value.wh,
                     "status": value.status,
-                    "day_total_wh": _round(totals[value.day]),
                 }
                 for value in values
             ],
-        })
+        }
+        if error:
+            reading["error"] = error
+        readings.append(reading)
     return readings
 
 
@@ -529,6 +624,27 @@ def _text(value: Any) -> str:
 def _compact(pairs: tuple[tuple[str, str], ...]) -> dict[str, str]:
     """Return the pairs that have a value, as a dict."""
     return {key: value for key, value in pairs if value}
+
+
+def _history_start(asset: dict[str, Any], point: dict[str, Any]) -> date | None:
+    """Return the first day worth reading for an Anlage: its contract start.
+
+    That is the sidebar asset's ``contractStartAt`` ("2024-08-01T00:00:00"), else
+    the metering point's ``vondat`` (20240801); None when neither is a date.
+    """
+    started = asset.get("contractStartAt")
+    if isinstance(started, str) and started.strip():
+        try:
+            return _as_day(datetime.fromisoformat(started.strip()))
+        except ValueError:
+            pass
+    since = _text(point.get("vondat"))
+    if len(since) == 8 and since.isdigit():
+        try:
+            return datetime.strptime(since, "%Y%m%d").date()
+        except ValueError:
+            pass
+    return None
 
 
 def _anlage_info(
@@ -612,11 +728,12 @@ class EwerkGoestingClient(SmartmeterClient):
         self._anlagen: list[tuple[int, dict[str, Any]]] | None = None
         # Zählpunkt -> vertragsID of every Anlage seen, kept across logins.
         self._contracts: dict[str, int] = {}
+        # Zählpunkt -> (device name, first day worth reading) of every Anlage
+        # seen, kept across logins: they name and bound its long-term statistics.
+        self._described: dict[str, tuple[str, date | None]] = {}
         # vertragsID -> (first day, last day, read at, register values) of the
         # period read last, shared by consumptions() and historical_data().
-        self._periods: dict[
-            int, tuple[date, date, datetime, dict[str, list[_Value]]]
-        ] = {}
+        self._periods: dict[int, tuple[date, date, datetime, _Registers]] = {}
         # Conditions logged already; later polls log them at DEBUG only.
         self._noticed: set[tuple[Any, ...]] = set()
 
@@ -871,6 +988,7 @@ class EwerkGoestingClient(SmartmeterClient):
 
         anlagen: list[tuple[int, dict[str, Any]]] = []
         taken: dict[str, int] = {}
+        described: dict[str, tuple[str, date | None]] = {}
         for asset in self._assets():
             anlage_id = asset["vertragsID"]
             if asset.get("isVisible") is False:
@@ -899,9 +1017,14 @@ class EwerkGoestingClient(SmartmeterClient):
                 )
                 continue
             taken[zaehlpunkt] = anlage_id
-            anlagen.append((anlage_id, _anlage_info(asset, point, zaehlpunkt)))
+            info = _anlage_info(asset, point, zaehlpunkt)
+            anlagen.append((anlage_id, info))
+            described[zaehlpunkt] = (
+                info["zaehlpunktName"], _history_start(asset, point)
+            )
 
         self._contracts.update(taken)
+        self._described.update(described)
         self._anlagen = anlagen
         LOGGER.debug(
             "E-Werk Gösting: %d Anlage(n): %s", len(anlagen), ", ".join(
@@ -994,10 +1117,13 @@ class EwerkGoestingClient(SmartmeterClient):
             and ("from" in item or "to" in item)
         )
         if daily:
-            LOGGER.warning(
-                "E-Werk Gösting: the portal answered %d daily value(s) instead of "
-                "15-minute values for Anlage %s, %s to %s; they are not read",
-                daily, anlage_id, first, last,
+            # Beyond its 15-minute limit the portal answers daily buckets. Nothing
+            # of such an answer is usable, and it must not pass for days without
+            # values either (the statistics would skip them for good).
+            raise SmartmeterQueryError(
+                f"The E-Werk Gösting portal answered {daily} "
+                f"daily value(s) instead of 15-minute values for Anlage {anlage_id}, "
+                f"{first} to {last}."
             )
         LOGGER.debug(
             "E-Werk Gösting: Anlage %s, %s to %s: %d 15-minute item(s)",
@@ -1007,18 +1133,22 @@ class EwerkGoestingClient(SmartmeterClient):
 
     def _register_values(
         self, anlage_id: int, items: list[tuple[datetime, dict[str, Any]]]
-    ) -> dict[str, list[_Value]]:
+    ) -> _Registers:
         """Return the values of the consumption and the production register.
 
         Each register is read from its measured ``G.01`` channel only; the other
         channels are reported once at INFO level. A register whose values are not
-        kWh or not 15-minute values is dropped with a warning, the other one kept.
+        kWh or not 15-minute values is not read, with a warning and its reason in
+        ``errors``; the other one is kept.
         """
         channels: dict[str, list[tuple[datetime, dict[str, Any]]]] = {}
         for instant, item in items:
             channel = str(item.get("channelType") or "").strip()
             channels.setdefault(channel, []).append((instant, item))
-        measured = {f"{obis} {_MEASURED_CHANNEL}": obis for obis, _ in _REGISTERS}
+        measured = {
+            f"{register.obis} {_MEASURED_CHANNEL}": register.obis
+            for register in _REGISTERS
+        }
         unread = sorted(set(channels) - set(measured))
         if unread:
             self._notice(
@@ -1030,6 +1160,7 @@ class EwerkGoestingClient(SmartmeterClient):
             )
 
         registers: dict[str, list[_Value]] = {}
+        errors: dict[str, str] = {}
         for channel, obis in measured.items():
             if channel not in channels:
                 continue
@@ -1041,14 +1172,15 @@ class EwerkGoestingClient(SmartmeterClient):
                     "E-Werk Gösting: %s of Anlage %s is not read: %s. Please open an "
                     "issue.", channel, anlage_id, err,
                 )
+                errors[obis] = f"{channel} is not read: {err}"
                 continue
             if values:
                 registers[obis] = values
-        return registers
+        return _Registers(registers, errors)
 
     def _period_values(
         self, anlage_id: int, start: date, end: date
-    ) -> dict[str, list[_Value]]:
+    ) -> _Registers:
         """Return the register values of an Anlage for the days start to end.
 
         Read in windows of at most 30 days, each item counted once. The last period
@@ -1087,14 +1219,15 @@ class EwerkGoestingClient(SmartmeterClient):
         """Return yesterday's and the day before's consumption of every Anlage.
 
         Summed up from the days historical_data() reads by default (and shared
-        with it). An Anlage that cannot be read is left out, the others are not.
+        with it), next to the id of the consumption's long-term statistic. An
+        Anlage that cannot be read is left out, the others are not.
         """
         start, today = _period(None, None)
         yesterday = today - timedelta(days=1)
         stats: list[dict[str, Any]] = []
         for anlage_id, info in self._discover():
             try:
-                values = self._period_values(anlage_id, start, today)
+                period = self._period_values(anlage_id, start, today)
             except SmartmeterLoginError:
                 raise
             except SmartmeterError as err:
@@ -1102,12 +1235,15 @@ class EwerkGoestingClient(SmartmeterClient):
                     "E-Werk Gösting: no statistics for Anlage %s: %s", anlage_id, err
                 )
                 continue
-            consumption = values.get(OBIS_CONSUMPTION, [])
+            consumption = period.values.get(OBIS_CONSUMPTION, [])
             stats.append({
                 "zaehlpunktnummer": info["zaehlpunktnummer"],
                 "consumptionYesterday": _day_statistic(consumption, yesterday),
                 "consumptionDayBeforeYesterday": _day_statistic(
                     consumption, yesterday - timedelta(days=1)
+                ),
+                "statistic_id": _statistic_id(
+                    info["zaehlpunktnummer"], _REGISTERS[0].statistic
                 ),
             })
         return stats
@@ -1116,18 +1252,27 @@ class EwerkGoestingClient(SmartmeterClient):
         self, zaehlpunktnummer: str, date_from: date | None = None,
         date_until: date | None = None
     ) -> list[dict[str, Any]]:
-        """Return the 15-minute consumption and production of one Anlage.
+        """Return the consumption and production of one Anlage.
 
         By default the last three Vienna days up to today, as today is never and
         yesterday often not published yet; given dates (or datetimes) count
-        inclusively. Timestamps are the portal's own: interval ends with offset.
+        inclusively. Per register the totals of the complete days, and every
+        quarter hour read: its start in Vienna time and the portal's own end.
         """
         anlage_id = self._anlage_id(zaehlpunktnummer)
+        zaehlpunkt = str(zaehlpunktnummer).strip()
+        name, history_start = self._described.get(zaehlpunkt, (zaehlpunkt, None))
         start, end = _period(date_from, date_until)
-        readings = _readings(self._period_values(anlage_id, start, end))
+        readings = _readings(
+            self._period_values(anlage_id, start, end), zaehlpunkt, name,
+            history_start,
+        )
         LOGGER.debug(
             "E-Werk Gösting: Anlage %s, %s to %s: %s", anlage_id, start, end,
-            ", ".join(f"{item['obisCode']} {item['records_read']}" for item in readings)
-            or "no values",
+            ", ".join(
+                f"{item['obisCode']} {item['records_read']}"
+                + (" (not read)" if "error" in item else "")
+                for item in readings
+            ) or "no values",
         )
         return readings

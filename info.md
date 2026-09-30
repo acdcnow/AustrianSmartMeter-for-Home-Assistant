@@ -16,7 +16,7 @@ via their web portals.
 * ✅ **aWATTar market prices** (public EPEX price feed, no account)
 * ✅ **Selectra tariff planning** (third-party tariff API, personal token, 60 calls/month free)
 * ✅ **Salzburg Netz** (service portal API key, 15-minute load profiles)
-* ✅ **E-Werk Gösting** (customer portal login, 15-minute values)
+* ✅ **E-Werk Gösting** (customer portal login, hourly long-term statistics with history)
 * 🚧 **Stromnetz Graz** (planned)
 
 **Requires Home Assistant 2026.9 or newer.**
@@ -29,7 +29,8 @@ via their web portals.
 * **Detailed diagnostics:** full technical details, including address, device IDs
   and facility type, plus a downloadable diagnostics file.
 * **Statistics:** daily consumption stats (yesterday / day before) where the
-  portal provides them.
+  portal provides them, and long-term statistics with the real timestamps for values
+  that a portal publishes a day late (E-Werk Gösting), history included.
 * **Brand images included:** the integration ships its own icon and logo, so it
   shows up properly in the Home Assistant UI.
 
@@ -57,8 +58,12 @@ commercial third-party API with a personal token and a free tier of 60 calls per
 login of the other grid operators. It reports the 15-minute load profile of a metering point.
 
 **E-Werk Gösting** is read through its customer portal (mein-portal.at) with the portal's
-e-mail address and password: one device per active Anlage (facility) with its 15-minute
-consumption and production - the same values the portal's own export contains.
+e-mail address and password: one device per active Anlage (facility), with the same
+15-minute values the portal's own export contains. The portal publishes a day's values
+on the next day, so the integration writes them into Home Assistant's long-term
+statistics with their real timestamps, hourly and with the whole history from the
+contract start: the statistic `<device> Consumption` is what to pick in the Energy
+dashboard. The sensor shows the total of the latest published day.
 
 **energiedaten.at** is a data platform rather than a grid operator and is configured
 with an **API key** (*Integrations → API Keys* in its dashboard, scopes
