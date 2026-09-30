@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HassJob, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api.client import get_client
 from .api.errors import SmartmeterError, SmartmeterLoginError
@@ -22,6 +24,16 @@ from .const import (
     PROVIDER_WIENER_NETZE,
 )
 from .statistics import StatisticsImporter, statistic_readings
+
+# Readings can hold values back until a moment (``settles_at``; E-Werk Gösting:
+# 12:00 of the day after theirs). One refresh this long after the earliest such
+# moment fetches them, whatever the scan interval.
+SETTLE_REFRESH_DELAY = timedelta(minutes=5)
+
+
+def _utcnow() -> datetime:
+    """Return the current time in UTC: the clock of the settle refresh."""
+    return dt_util.utcnow()
 
 
 class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -40,6 +52,8 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # statistics, in the background (statistics.py).
         self._statistics = StatisticsImporter(hass, self._async_read_history)
         self._shut_down = False
+        # Cancels the refresh scheduled for held-back values (settles_at), if any.
+        self._settle_refresh: CALLBACK_TYPE | None = None
 
         super().__init__(
             hass,
@@ -53,6 +67,7 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_shutdown(self) -> None:
         """Cancel any scheduled call, ignore new runs, and start no import."""
         self._shut_down = True
+        self._async_cancel_settle_refresh()
         await super().async_shutdown()
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -69,6 +84,7 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
         self._async_start_statistics_import(data)
+        self._async_schedule_settle_refresh(data)
         return data
 
     async def _async_read_portal(self) -> dict[str, Any]:
@@ -139,6 +155,49 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             eager_start=False,
         )
 
+    @callback
+    def _async_schedule_settle_refresh(self, data: dict[str, Any]) -> None:
+        """Schedule one refresh for the values that the readings hold back.
+
+        A reading's ``settles_at`` is when its held-back values count. One refresh
+        at the earliest such moment in the future, plus SETTLE_REFRESH_DELAY,
+        fetches them whatever the scan interval. Every successful poll replaces the
+        scheduled refresh; readings without ``settles_at`` schedule none, and neither
+        does an entry whose polling is disabled.
+        """
+        self._async_cancel_settle_refresh()
+        if self._shut_down or self._entry.pref_disable_polling:
+            return
+        now = _utcnow()
+        settles = _earliest_settling(data, now)
+        if settles is None:
+            return
+        when = settles + SETTLE_REFRESH_DELAY
+        LOGGER.debug(
+            "Values are held back until %s; one more refresh at %s",
+            settles.isoformat(), when.isoformat(),
+        )
+        self._settle_refresh = async_call_later(
+            self.hass,
+            (when - now).total_seconds(),
+            HassJob(
+                self._async_settle_refresh, "asm settle refresh",
+                cancel_on_shutdown=True,
+            ),
+        )
+
+    async def _async_settle_refresh(self, _now: datetime) -> None:
+        """Fetch the values that count now."""
+        self._settle_refresh = None
+        await self.async_request_refresh()
+
+    @callback
+    def _async_cancel_settle_refresh(self) -> None:
+        """Cancel the refresh scheduled for held-back values, if any."""
+        if self._settle_refresh is not None:
+            self._settle_refresh()
+            self._settle_refresh = None
+
     async def _async_read_history(
         self, zaehlpunkt: str, first: date, last: date
     ) -> list[dict[str, Any]]:
@@ -174,6 +233,28 @@ def _scan_interval(entry: ConfigEntry) -> int:
     except (TypeError, ValueError):
         return DEFAULT_SCAN_INTERVAL
     return max(interval, MIN_SCAN_INTERVAL)
+
+
+def _earliest_settling(data: dict[str, Any], now: datetime) -> datetime | None:
+    """Return the earliest ``settles_at`` of the readings that lies after ``now``."""
+    earliest: datetime | None = None
+    for item in (data or {}).values():
+        readings = item.get("readings") if isinstance(item, dict) else None
+        if isinstance(readings, dict):
+            readings = [readings]
+        for reading in readings or []:
+            value = reading.get("settles_at") if isinstance(reading, dict) else None
+            if not isinstance(value, str):
+                continue
+            try:
+                moment = dt_util.parse_datetime(value)
+            except ValueError:  # well formed, but no valid date
+                continue
+            if moment is None or moment.tzinfo is None or moment <= now:
+                continue
+            if earliest is None or moment < earliest:
+                earliest = moment
+    return earliest
 
 
 def _match_stats(

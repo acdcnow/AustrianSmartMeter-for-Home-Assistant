@@ -335,8 +335,10 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             attributes["statistic_id"] = statistic_id
             if data.get("history_start"):
                 attributes["history_start"] = data["history_start"]
-        if "data_until" in data:
-            attributes["data_until"] = data["data_until"]
+        # How far the values reach, and those held back until they are final.
+        for key in ("data_until", "held_back", "settles_at"):
+            if key in data:
+                attributes[key] = data[key]
 
         info = self.coordinator.data.get(self._zaehlpunkt, {}).get("info", {})
         for key, value in info.items():

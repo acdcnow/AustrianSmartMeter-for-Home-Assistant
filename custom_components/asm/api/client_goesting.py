@@ -44,13 +44,20 @@ against the live portal on 2026-09-29:
   day its interval starts in. ``level`` L1 and L2 are measured values, L3
   substitute values.
 * A day's values are published on the next day, by 12:00 at the latest and
-  usually earlier: today's are missing, and yesterday's can arrive late.
+  usually earlier: today's are missing, and yesterday's can arrive late. While the
+  portal is publishing a day, its values can still change (on 2026-09-30, the
+  previous day's total read 10,385, then 11,808 and then 13,128 Wh within an
+  hour), and no field tells provisional values from final ones. A day's values
+  therefore count from 12:00 of the next day on (PUBLISHED_BY_HOUR): the day has
+  *settled* then. A poll reads the last four days, one request per Anlage.
 
 A reading per register (consumption, and production when the portal reports it)
-therefore carries two views of what was read. Its ``messwerte`` are the totals of
-the complete Vienna days, oldest first, and the entity shows the latest one; its
-``data_until`` is the end of the newest quarter hour read. Its ``intervals`` are
-the quarter hours themselves with their real timestamps, which
+therefore carries two views of the settled values. Its ``messwerte`` are the
+totals of the complete settled Vienna days, oldest first, and the entity shows the
+latest one; its ``data_until`` is the end of the newest settled quarter hour, while
+``held_back`` counts the quarter hours read but not settled yet and ``settles_at``
+says when the newest of them settle. Its ``intervals`` are the settled quarter
+hours themselves with their real timestamps, which
 statistics.py sums per hour into Home Assistant's long-term statistics: the
 external statistic ``statistic_id`` (``asm:<Zählpunkt>_consumption``), which is
 what the Energy dashboard uses. Its first import reads the whole history from
@@ -105,9 +112,16 @@ QH_WINDOW_MAX_SECONDS = 30 * 24 * 60 * 60  # 2,592,000 s
 
 INTERVAL_MINUTES = 15
 
-# A poll reads today, yesterday and the day before: yesterday is often not
-# published yet in the morning, and the sensors still need a value.
-DEFAULT_DAYS = 3
+# A poll reads today and the three days before. Yesterday's values count only from
+# PUBLISHED_BY_HOUR on, and the sensors still need a value before - also when the
+# day before yesterday is incomplete on the portal. The settled days among them are
+# compared with what was imported (statistics.py).
+DEFAULT_DAYS = 4
+
+# A day's values count from this hour (Vienna time) of the next day on: the portal
+# has published the day by then, and while it publishes one, the values can still
+# change. Until then the day's quarter hours are held back.
+PUBLISHED_BY_HOUR = 12
 
 # A period read is kept this long: reading the same days again costs no request.
 PERIOD_CACHE_MAX_AGE = timedelta(minutes=10)
@@ -369,9 +383,32 @@ def _login_failure(message: str, username: str) -> SmartmeterError:
 # ---------------------------------------------------------------- time helpers
 
 
-def _today() -> date:
-    """Return the current date in Europe/Vienna."""
-    return datetime.now(VIENNA).date()
+def _now() -> datetime:
+    """Return the current time in Europe/Vienna."""
+    return datetime.now(VIENNA)
+
+
+def _settles_at(day: date) -> datetime:
+    """Return when a Vienna day's values count: PUBLISHED_BY_HOUR the next day."""
+    following = day + timedelta(days=1)
+    return datetime(
+        following.year, following.month, following.day, PUBLISHED_BY_HOUR,
+        tzinfo=VIENNA,
+    )
+
+
+def _settled(day: date, now: datetime) -> bool:
+    """Return True when a Vienna day's values count at ``now`` (see _settles_at)."""
+    # Compared as instants: aware datetimes of one tzinfo compare by wall clock.
+    return now.astimezone(timezone.utc) >= _settles_at(day)
+
+
+def _last_settling(now: datetime) -> datetime:
+    """Return the latest moment at or before ``now`` at which a day settled."""
+    today = now.astimezone(VIENNA).date()
+    if _settled(today - timedelta(days=1), now):
+        return _settles_at(today - timedelta(days=1))  # today, PUBLISHED_BY_HOUR
+    return _settles_at(today - timedelta(days=2))
 
 
 def _midnight(day: date) -> datetime:
@@ -423,9 +460,9 @@ def _as_day(value: Any) -> date:
     raise SmartmeterQueryError(f"Not a date: {value!r}.")
 
 
-def _period(date_from: Any, date_until: Any) -> tuple[date, date]:
+def _period(date_from: Any, date_until: Any, today: date) -> tuple[date, date]:
     """Return the days to read: the given ones, else the last DEFAULT_DAYS days."""
-    end = _as_day(date_until) if date_until is not None else _today()
+    end = _as_day(date_until) if date_until is not None else today
     if date_from is not None:
         start = _as_day(date_from)
     else:
@@ -553,18 +590,23 @@ def _day_totals(values: list[_Value]) -> list[dict[str, Any]]:
 
 
 def _readings(
-    registers: _Registers, zaehlpunkt: str, name: str, history_start: date | None
+    registers: _Registers, zaehlpunkt: str, name: str, history_start: date | None,
+    now: datetime,
 ) -> list[dict[str, Any]]:
     """Turn register values into the readings contract of sensor.py.
 
-    One reading per register with values, consumption first. Its ``messwerte``
-    are the totals of the complete days (the entity shows the latest one), its
-    ``intervals`` every quarter hour read, for the long-term statistic
-    ``statistic_id`` (statistics.py), and ``data_until`` the portal's end of the
-    newest quarter hour (None without values). ``history_start`` is the first day
-    worth reading, ``name`` the device name. A register that was not read (wrong unit,
-    values off the 15-minute grid) keeps its reading, without values and with the
-    reason as ``error``: for the statistics, that is no period without values.
+    One reading per register with values, consumption first. Only the quarter
+    hours of the days settled at ``now`` count (see PUBLISHED_BY_HOUR): its
+    ``messwerte`` are the totals of the complete settled days (the entity shows
+    the latest one), its ``intervals`` every settled quarter hour, for the
+    long-term statistic ``statistic_id`` (statistics.py), and ``data_until`` the
+    portal's end of the newest settled quarter hour (None without one).
+    ``held_back`` counts the quarter hours read but not settled yet, and
+    ``settles_at`` is when the newest of them settle (None when none is held back).
+    ``history_start`` is the first day worth reading, ``name`` the device name. A
+    register that was not read (wrong unit, values off the 15-minute grid) keeps its
+    reading, without values and with the reason as ``error``: for the statistics,
+    that is no period without values.
     """
     readings: list[dict[str, Any]] = []
     for register in _REGISTERS:
@@ -572,6 +614,9 @@ def _readings(
         error = registers.errors.get(register.obis)
         if not values and not error:
             continue
+        is_settled = {day: _settled(day, now) for day in {v.day for v in values}}
+        settled = [value for value in values if is_settled[value.day]]
+        held = [value for value in values if not is_settled[value.day]]
         reading: dict[str, Any] = {
             "obisCode": register.obis,
             "name": register.name,
@@ -581,9 +626,14 @@ def _readings(
             "statistic_name": f"{name} {register.label}",
             "history_start": history_start.isoformat() if history_start else None,
             "interval_minutes": INTERVAL_MINUTES,
-            "records_read": len(values),
-            "data_until": values[-1].stamp if values else None,
-            "messwerte": _day_totals(values),
+            "records_read": len(settled),
+            "data_until": settled[-1].stamp if settled else None,
+            "held_back": len(held),
+            "settles_at": (
+                _settles_at(max(value.day for value in held)).isoformat()
+                if held else None
+            ),
+            "messwerte": _day_totals(settled),
             "intervals": [
                 {
                     "start": _interval_start(value.instant).isoformat(),
@@ -591,7 +641,7 @@ def _readings(
                     "wh": value.wh,
                     "status": value.status,
                 }
-                for value in values
+                for value in settled
             ],
         }
         if error:
@@ -1168,20 +1218,22 @@ class EwerkGoestingClient(SmartmeterClient):
         return _Registers(registers, errors)
 
     def _period_values(
-        self, anlage_id: int, start: date, end: date
+        self, anlage_id: int, start: date, end: date, now: datetime
     ) -> _Registers:
         """Return the register values of an Anlage for the days start to end.
 
         Read in windows of at most 30 days, each item counted once. The last period
         per Anlage is kept for PERIOD_CACHE_MAX_AGE: reading the same days again
-        within that time costs no request.
+        within that time costs no request - unless a day has settled since it was
+        read (see PUBLISHED_BY_HOUR), as values read before must not count.
         """
-        now = datetime.now(timezone.utc)
+        now = now.astimezone(timezone.utc)
         cached = self._periods.get(anlage_id)
         if (
             cached is not None
             and cached[:2] == (start, end)
-            and now - cached[2] < PERIOD_CACHE_MAX_AGE
+            and timedelta(0) <= now - cached[2] < PERIOD_CACHE_MAX_AGE
+            and cached[2] >= _last_settling(now)
         ):
             return cached[3]
 
@@ -1218,18 +1270,21 @@ class EwerkGoestingClient(SmartmeterClient):
     ) -> list[dict[str, Any]]:
         """Return the consumption and production of one Anlage.
 
-        By default the last three Vienna days up to today, as today is never and
-        yesterday often not published yet; given dates (or datetimes) count
-        inclusively. Per register the totals of the complete days, and every
-        quarter hour read: its start in Vienna time and the portal's own end.
+        By default the last four Vienna days up to today (DEFAULT_DAYS), as today is
+        never published yet and yesterday counts only from PUBLISHED_BY_HOUR on; given
+        dates (or datetimes) count inclusively. Per register the totals of the
+        complete settled days, and every settled quarter hour: its start in Vienna
+        time and the portal's own end. The quarter hours of a day that has not
+        settled yet are only counted (``held_back``).
         """
         anlage_id = self._anlage_id(zaehlpunktnummer)
         zaehlpunkt = str(zaehlpunktnummer).strip()
         name, history_start = self._described.get(zaehlpunkt, (zaehlpunkt, None))
-        start, end = _period(date_from, date_until)
+        now = _now()
+        start, end = _period(date_from, date_until, now.astimezone(VIENNA).date())
         readings = _readings(
-            self._period_values(anlage_id, start, end), zaehlpunkt, name,
-            history_start,
+            self._period_values(anlage_id, start, end, now), zaehlpunkt, name,
+            history_start, now,
         )
         LOGGER.debug(
             "E-Werk Gösting: Anlage %s, %s to %s: %s", anlage_id, start, end,
@@ -1239,4 +1294,11 @@ class EwerkGoestingClient(SmartmeterClient):
                 for item in readings
             ) or "no values",
         )
+        for item in readings:
+            if item["held_back"]:
+                LOGGER.debug(
+                    "E-Werk Gösting: Anlage %s, %s: %d quarter hour(s) held back "
+                    "until %s, while the portal may still change them", anlage_id,
+                    item["obisCode"], item["held_back"], item["settles_at"],
+                )
         return readings
