@@ -1,6 +1,7 @@
 """Sensor platform for Austria Smartmeter."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -14,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -45,6 +47,9 @@ _LATEST_SKIPPED = frozenset(
 # The entries of a reading that carries a statistic_id are the totals of whole
 # days; whether the latest day is validated (complete and measured) is kept.
 _LATEST_SKIPPED_STATISTIC = _LATEST_SKIPPED - {"validated"}
+
+# The consumption registers, whose statistic the "Latest Data" entity names.
+_CONSUMPTION_OBIS = ("1-1:1.9.0", "1-1:1.8.0")
 
 # Instantaneous power. Power is a measurement, not a counter, whatever the
 # provider's value type says.
@@ -110,6 +115,11 @@ async def async_setup_entry(
                 entities.append(
                     AustriaSmartMeterSensor(coordinator, zp_num, reading_data, info)
                 )
+
+        # 1b. How far the data reaches, for readings that say so (data_until):
+        # one timestamp per metering point.
+        if any(isinstance(reading, dict) and "data_until" in reading for reading in readings):
+            entities.append(AustriaSmartMeterDataUntil(coordinator, zp_num, info))
 
         # 2. Diagnostic Sensors (Static Info & Address)
         if "zaehlpunktnummer" in info:
@@ -325,6 +335,8 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             attributes["statistic_id"] = statistic_id
             if data.get("history_start"):
                 attributes["history_start"] = data["history_start"]
+        if "data_until" in data:
+            attributes["data_until"] = data["data_until"]
 
         info = self.coordinator.data.get(self._zaehlpunkt, {}).get("info", {})
         for key, value in info.items():
@@ -374,6 +386,65 @@ class AustriaSmartMeterDiagnostic(
         self._attr_device_info = _get_shared_device_info(
             zaehlpunkt, info, coordinator.provider
         )
+
+
+class AustriaSmartMeterDataUntil(
+    CoordinatorEntity[AustriaSmartMeterCoordinator], SensorEntity
+):
+    """Diagnostic timestamp: how far the data of a metering point reaches.
+
+    For readings that name the end of their newest value (``data_until``), such as
+    a portal that publishes a day only on the next day. The state follows every
+    poll: the newest ``data_until`` of the metering point's readings.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(self, coordinator, zaehlpunkt, info) -> None:
+        super().__init__(coordinator)
+        self._zaehlpunkt = zaehlpunkt
+        self._attr_name = f"{_get_clean_meter_name(info)} Latest Data"
+        self._attr_unique_id = f"{zaehlpunkt}_data_until"
+        self._attr_device_info = _get_shared_device_info(
+            zaehlpunkt, info, coordinator.provider
+        )
+
+    def _readings(self) -> list[dict[str, Any]]:
+        """Return the current readings of the metering point."""
+        readings = self.coordinator.data.get(self._zaehlpunkt, {}).get("readings", [])
+        if isinstance(readings, dict):
+            readings = [readings]
+        return [reading for reading in readings or [] if isinstance(reading, dict)]
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the newest ``data_until``; None when none can be parsed."""
+        newest: datetime | None = None
+        for reading in self._readings():
+            value = reading.get("data_until")
+            if not isinstance(value, str):
+                continue
+            try:
+                moment = dt_util.parse_datetime(value)
+            except ValueError:  # well formed, but no valid date
+                moment = None
+            # A timestamp needs its offset; the newest instant wins.
+            if moment is not None and moment.tzinfo is not None:
+                if newest is None or moment > newest:
+                    newest = moment
+        return newest
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the statistic of the consumption reading, if it has one."""
+        for reading in self._readings():
+            if reading.get("obisCode") in _CONSUMPTION_OBIS and reading.get(
+                "statistic_id"
+            ):
+                return {"statistic_id": reading["statistic_id"]}
+        return {}
 
 
 class AustriaSmartMeterStatistic(

@@ -63,7 +63,8 @@ e-mail address and password: one device per active Anlage (facility), with the s
 on the next day, so the integration writes them into Home Assistant's long-term
 statistics with their real timestamps, hourly and with the whole history from the
 contract start: the statistic `<device> Consumption` is what to pick in the Energy
-dashboard. The sensor shows the total of the latest published day.
+dashboard. The *Consumption Latest Day* sensor shows the total of the latest day the
+portal has published, and *Latest Data* how far the portal's data reaches.
 
 **energiedaten.at** is a data platform rather than a grid operator and is configured
 with an **API key** (*Integrations → API Keys* in its dashboard, scopes

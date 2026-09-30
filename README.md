@@ -199,19 +199,21 @@ Every active *Anlage* (facility) of the account becomes a device of its own; Anl
 whose contract has ended are left out. A device is identified by the Anlage's
 Zählpunkt, which it shows as its *Metering Point ID*, and named after the address plus
 the Anlagennummer, e.g. `Musterstraße 1/2 (Anlage 20001234)`, so that two Anlagen at one
-address stay apart. Each device gets a **Daily Consumption** sensor (*Verbrauch
-(gemessen)*) and, when the portal reports feed-in, a **Daily Production** sensor
+address stay apart. Each device gets a **Consumption Latest Day** sensor (*Verbrauch
+(gemessen)*) and, when the portal reports feed-in, a **Production Latest Day** sensor
 (*Lieferung (gemessen)*). Both show the total in `Wh` of the latest complete day that
 the portal has published (96 quarter hours, 92 or 100 on the days of the DST switches).
-Their attributes are the day (`last_reading_date`), `latest_validated` (true when all
-its values are measured values), `latest_intervals`, the `statistic_id` of the
-long-term statistic below and `history_start` (the contract start). **Consumption
-Yesterday** and **Consumption Day Before Yesterday** add up the quarter hours of those
-days; their attribute `validated` becomes true once a day is complete and all its values
-are measured values. None of these sensors has a `state_class`, on purpose: the values
-reach Home Assistant's statistics with their real timestamps instead (see below). The
-meter's serial number, the contract, the load profile and the address appear as device
-details, diagnostic entities and attributes.
+The portal publishes a day by 12:00 of the next day, usually earlier - so in the
+morning, the latest day is the day before yesterday. Their attributes are the day
+(`last_reading_date`), `data_until` (the end of the newest quarter hour read),
+`latest_validated` (true when all the day's values are measured values),
+`latest_intervals`, the `statistic_id` of the long-term statistic below and
+`history_start` (the contract start). These sensors have no `state_class`, on purpose:
+the values reach Home Assistant's statistics with their real timestamps instead (see
+below). The diagnostic **Latest Data** sensor is the end of the newest quarter hour the
+portal has delivered; Home Assistant shows it as *x hours ago*, which tells how fresh
+the portal's data is. The meter's serial number, the contract, the load profile and the
+address appear as device details, diagnostic entities and attributes.
 
 Production values follow the portal's channel naming (*Lieferung (gemessen)*, channel
 `1-1:2.9.0 G.01`) but have not been verified with a feed-in Anlage yet. Only the
@@ -266,15 +268,16 @@ and **`<device> Production`** when it feeds in.
   may still deliver it. Once newer values have existed for more than 7 days, the gap is
   skipped, with a warning in the log that names it ("so this gap is skipped").
 
-**Updating from the preview?** Three sensors per Anlage - four with feed-in - had
-`state_class: total`, so Home Assistant compiled statistics from their states at poll
-time, and they lose their state class now: **Daily Consumption** (the former
-**Consumption 15 min**), **Consumption Yesterday**, **Consumption Day Before Yesterday**
-and, with feed-in, **Daily Production** (the former **Production 15 min**). For each of
-them Home Assistant reports that it "no longer has a state class" (*Settings →
-Repairs*); their old statistics can be cleared in *Developer tools → Statistics*. The
-renamed sensors keep their entity IDs, e.g. `sensor.…_consumption_15_min`: Home
-Assistant never renames an entity ID, but it can be changed in the entity's settings.
+**Updating from the preview?** The former **Consumption 15 min** sensor is now
+**Consumption Latest Day** (with feed-in, **Production 15 min** is now **Production
+Latest Day**). It keeps its entity ID, `sensor.…_consumption_15_min`: Home Assistant
+never renames an entity ID, but it can be changed in the entity's settings. It had
+`state_class: total`, so Home Assistant compiled statistics from its state at poll
+time; now that the state class is gone, Home Assistant reports that it "no longer has a
+state class" (*Settings → Repairs*), and its old statistics can be cleared in
+*Developer tools → Statistics*. **Consumption Yesterday** and **Consumption Day Before
+Yesterday** are no longer provided: Home Assistant marks them as such, and they can be
+deleted on their entity page (their old statistics in *Developer tools → Statistics*).
 If one of these sensors was selected in the Energy dashboard, replace it with the
 `<device> Consumption` statistic.
 
@@ -399,9 +402,11 @@ Netz Niederösterreich only exposes the **consumption of a period**, not the
 cumulative meter reading, so that provider gets a `Daily Consumption` sensor
 instead (also in Wh, `state_class: total`).
 
-E-Werk Gösting gets a `Daily Consumption` sensor as well, but without a state class:
-its values reach the long-term statistics with their real timestamps, as the statistic
-`<device> Consumption` that its Energy dashboard uses (see *E-Werk Gösting* above).
+E-Werk Gösting gets a `Consumption Latest Day` sensor instead - the total of the latest
+day that the portal has published - without a state class: its values reach the
+long-term statistics with their real timestamps, as the statistic `<device> Consumption`
+that its Energy dashboard uses. Its diagnostic `Latest Data` timestamp shows how far the
+portal's data reaches (see *E-Werk Gösting* above).
 
 ### Statistics
 
@@ -447,15 +452,16 @@ contains the HTTP status code and a snippet of the response.
 
 * **E-Werk Gösting** - the customer portal on mein-portal.at, read with the portal
   account's e-mail address and password. Every active Anlage of the account becomes a
-  device with the consumption of the latest published day, of yesterday and of the day
-  before, in Wh. The portal publishes a day's values on the next day, so the 15-minute
-  values go into Home Assistant's long-term statistics with their real timestamps:
-  hourly, as the statistic `<device> Consumption` for the Energy dashboard, with the
-  whole history from the contract start on the first poll. Production (feed-in) values
-  follow the portal's channel naming but have not been verified with a feed-in Anlage
-  yet. The values are the data behind the portal's own export: against the live
-  portal, the integration reads the same quarter hours with the same values as the
-  portal's `.xlsx` export, and this was verified on payloads captured from the live
+  device with the consumption of the latest day the portal has published, in Wh
+  (*Consumption Latest Day*), and a *Latest Data* timestamp that tells how far the
+  portal's data reaches. The portal publishes a day's values on the next day, so the
+  15-minute values go into Home Assistant's long-term statistics with their real
+  timestamps: hourly, as the statistic `<device> Consumption` for the Energy dashboard,
+  with the whole history from the contract start on the first poll. Production
+  (feed-in) values follow the portal's channel naming but have not been verified with a
+  feed-in Anlage yet. The values are the data behind the portal's own export: against
+  the live portal, the integration reads the same quarter hours with the same values as
+  the portal's `.xlsx` export, and this was verified on payloads captured from the live
   portal for both DST days. Energy-community channels are not read. A portal update
   that changes the login is followed automatically.
 * **Long-term statistics for late data** - readings that carry a statistic ID are

@@ -48,8 +48,9 @@ against the live portal on 2026-09-29:
 
 A reading per register (consumption, and production when the portal reports it)
 therefore carries two views of what was read. Its ``messwerte`` are the totals of
-the complete Vienna days, oldest first, and the entity shows the latest one. Its
-``intervals`` are the quarter hours themselves with their real timestamps, which
+the complete Vienna days, oldest first, and the entity shows the latest one; its
+``data_until`` is the end of the newest quarter hour read. Its ``intervals`` are
+the quarter hours themselves with their real timestamps, which
 statistics.py sums per hour into Home Assistant's long-term statistics: the
 external statistic ``statistic_id`` (``asm:<Zählpunkt>_consumption``), which is
 what the Energy dashboard uses. Its first import reads the whole history from
@@ -108,7 +109,7 @@ INTERVAL_MINUTES = 15
 # published yet in the morning, and the sensors still need a value.
 DEFAULT_DAYS = 3
 
-# consumptions() and historical_data() of one poll share what was read.
+# A period read is kept this long: reading the same days again costs no request.
 PERIOD_CACHE_MAX_AGE = timedelta(minutes=10)
 
 # Energy consumed / fed in within an interval: the OBIS part of the portal's
@@ -152,8 +153,10 @@ class _Register(NamedTuple):
 
 # The readings of an Anlage, in this order.
 _REGISTERS = (
-    _Register(OBIS_CONSUMPTION, "Daily Consumption", "consumption", "Consumption"),
-    _Register(OBIS_PRODUCTION, "Daily Production", "production", "Production"),
+    _Register(
+        OBIS_CONSUMPTION, "Consumption Latest Day", "consumption", "Consumption"
+    ),
+    _Register(OBIS_PRODUCTION, "Production Latest Day", "production", "Production"),
 )
 
 # A register is read from its measured channel only ("Verbrauch (gemessen)",
@@ -557,8 +560,9 @@ def _readings(
     One reading per register with values, consumption first. Its ``messwerte``
     are the totals of the complete days (the entity shows the latest one), its
     ``intervals`` every quarter hour read, for the long-term statistic
-    ``statistic_id`` (statistics.py). ``history_start`` is the first day worth
-    reading, ``name`` the device name. A register that was not read (wrong unit,
+    ``statistic_id`` (statistics.py), and ``data_until`` the portal's end of the
+    newest quarter hour (None without values). ``history_start`` is the first day
+    worth reading, ``name`` the device name. A register that was not read (wrong unit,
     values off the 15-minute grid) keeps its reading, without values and with the
     reason as ``error``: for the statistics, that is no period without values.
     """
@@ -578,6 +582,7 @@ def _readings(
             "history_start": history_start.isoformat() if history_start else None,
             "interval_minutes": INTERVAL_MINUTES,
             "records_read": len(values),
+            "data_until": values[-1].stamp if values else None,
             "messwerte": _day_totals(values),
             "intervals": [
                 {
@@ -593,22 +598,6 @@ def _readings(
             reading["error"] = error
         readings.append(reading)
     return readings
-
-
-def _day_statistic(values: list[_Value], day: date) -> dict[str, Any]:
-    """Return the consumption of one day for the statistic sensors.
-
-    A day is validated once it holds all its quarter hours (96, or 92 and 100 on
-    the days of the DST switches) and every one of them is a measured value.
-    """
-    of_day = [value for value in values if value.day == day]
-    return {
-        "value": _round(sum(value.wh for value in of_day)) if of_day else None,
-        "date": day.isoformat(),
-        "validated": bool(of_day)
-        and len(of_day) == _intervals_in(day)
-        and all(value.status == "VALID" for value in of_day),
-    }
 
 
 # ------------------------------------------------------------------- Anlagen
@@ -732,7 +721,7 @@ class EwerkGoestingClient(SmartmeterClient):
         # seen, kept across logins: they name and bound its long-term statistics.
         self._described: dict[str, tuple[str, date | None]] = {}
         # vertragsID -> (first day, last day, read at, register values) of the
-        # period read last, shared by consumptions() and historical_data().
+        # period read last (see PERIOD_CACHE_MAX_AGE).
         self._periods: dict[int, tuple[date, date, datetime, _Registers]] = {}
         # Conditions logged already; later polls log them at DEBUG only.
         self._noticed: set[tuple[Any, ...]] = set()
@@ -1184,8 +1173,8 @@ class EwerkGoestingClient(SmartmeterClient):
         """Return the register values of an Anlage for the days start to end.
 
         Read in windows of at most 30 days, each item counted once. The last period
-        per Anlage is kept for PERIOD_CACHE_MAX_AGE: consumptions() and
-        historical_data() of one poll cost a single request per Anlage.
+        per Anlage is kept for PERIOD_CACHE_MAX_AGE: reading the same days again
+        within that time costs no request.
         """
         now = datetime.now(timezone.utc)
         cached = self._periods.get(anlage_id)
@@ -1216,37 +1205,12 @@ class EwerkGoestingClient(SmartmeterClient):
         return values
 
     def consumptions(self) -> list[dict[str, Any]]:
-        """Return yesterday's and the day before's consumption of every Anlage.
+        """E-Werk Gösting has no ready made statistics.
 
-        Summed up from the days historical_data() reads by default (and shared
-        with it), next to the id of the consumption's long-term statistic. An
-        Anlage that cannot be read is left out, the others are not.
+        The day totals are the readings' ``messwerte``, and the quarter hours go
+        into the long-term statistics with their real timestamps (statistics.py).
         """
-        start, today = _period(None, None)
-        yesterday = today - timedelta(days=1)
-        stats: list[dict[str, Any]] = []
-        for anlage_id, info in self._discover():
-            try:
-                period = self._period_values(anlage_id, start, today)
-            except SmartmeterLoginError:
-                raise
-            except SmartmeterError as err:
-                LOGGER.warning(
-                    "E-Werk Gösting: no statistics for Anlage %s: %s", anlage_id, err
-                )
-                continue
-            consumption = period.values.get(OBIS_CONSUMPTION, [])
-            stats.append({
-                "zaehlpunktnummer": info["zaehlpunktnummer"],
-                "consumptionYesterday": _day_statistic(consumption, yesterday),
-                "consumptionDayBeforeYesterday": _day_statistic(
-                    consumption, yesterday - timedelta(days=1)
-                ),
-                "statistic_id": _statistic_id(
-                    info["zaehlpunktnummer"], _REGISTERS[0].statistic
-                ),
-            })
-        return stats
+        return []
 
     def historical_data(
         self, zaehlpunktnummer: str, date_from: date | None = None,
