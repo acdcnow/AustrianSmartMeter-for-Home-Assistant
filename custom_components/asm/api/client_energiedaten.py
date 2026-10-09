@@ -22,21 +22,41 @@ Contract notes that matter for Home Assistant:
   the consumption of one local day and reported as a period value
   (``wertetyp == "DAY"``), so the sensor never claims to be a total_increasing
   meter reading.
+* **The window is read as a range, not day by day.** The documented parameters
+  of the data endpoint are ``from``, ``to``, ``order`` and ``cursor``, and the
+  platform's own Home Assistant integration always sends ``order=asc``. Data is
+  delivered day-after — the platform itself says "hours to days" for the first
+  readings — so a day-per-request adapter leaves the sensors empty until the
+  grid operator delivers, and never looks at that day again, because the
+  coordinator has moved on to the next one. This adapter therefore reads
+  ``LOOKBACK_DAYS`` at once and reports the newest day inside the window that
+  actually carries readings (issue #6).
+* **The data endpoint is not filtered by OBIS code.** ``obis_codes[]`` is not
+  part of the documented contract; the platform's own integration filters the
+  codes client-side, and so does this adapter. A request that carries an
+  unknown filter parameter can come back empty, which is exactly how the
+  provider failed before this release.
 * Data is delivered day-after, and the platform's completeness accounting is
-  per *Vienna* day. The window is therefore sent as an explicit instant with
-  the Vienna UTC offset — a date-only value would be parsed as UTC midnight,
-  which is mid-morning in Vienna and would silently drop the first intervals.
+  per *Vienna* day, so the day a record belongs to is derived from its UTC
+  timestamp in ``Europe/Vienna``. The window boundaries are sent as explicit
+  instants with the Vienna UTC offset — a date-only value would be parsed as UTC
+  midnight, which is mid-morning in Vienna and would silently drop the first
+  intervals.
 * The API vocabulary uses channel suffixes (``1-1:1.9.0 P.01`` is the grid
-  residual, ``1-1:1.9.0 G.01`` the meter-wide total). Both are normalised onto
-  the integration's OBIS codes (``1-1:1.9.0``) so entity ids stay consistent
-  with the other providers; the source code stays visible in the attributes.
+  consumption, ``1-1:1.9.0 G.01`` the meter-wide total). The platform's own
+  analyses read exactly one code per meter and timestamp — the total where it
+  exists, the grid figure otherwise — and explicitly warn that the two must
+  never be added up. This adapter prefers ``G.01`` and falls back to ``P.01``.
+  Both are normalised onto the integration's OBIS codes (``1-1:1.9.0``) so
+  entity ids stay consistent with the other providers; the source code stays
+  visible in the attributes.
 """
 from __future__ import annotations
 
 import calendar
 import logging
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import quote
 
 import requests
@@ -80,6 +100,15 @@ SESSION_MAX_AGE = timedelta(hours=24)
 MAX_PER_PAGE = 100
 MAX_PAGES = 10
 
+# The default window of a poll. Data is delivered day-after and the platform
+# names "hours to days" until it arrives, so one week gives every grid operator
+# room to deliver and still arrives in a single request (a week of 15-minute
+# values is a few thousand records, far below the server's record cap).
+LOOKBACK_DAYS = 7
+
+# The data endpoint returns its records in timestamp order when asked to.
+ORDER_ASC = "asc"
+
 # The server caps a data window at 50 000 records and flags the response.
 SERVER_RECORD_CAP = 50_000
 
@@ -97,24 +126,17 @@ QUALITY_LABELS = {1: "measured", 2: "estimated", 3: "unreliable"}
 QUALITY_RANK = {"measured": 0, "estimated": 1, "unreliable": 2, "unknown": 3}
 
 # Registers that should end up as one sensor each. The first source code that
-# carries data wins; the meter-wide total (G.01) is the fallback for meters that
-# do not report a grid residual. All codes are part of the API's default egress
-# vocabulary, so no register needs to be asked for explicitly.
+# carries data wins. A meter that is not in an energy community reports the same
+# value under the total (G.01) and the grid figure (P.01); a meter that is in one
+# reports the community share inside the total, so the total is the one the
+# platform itself reads. All codes are part of the API's default egress
+# vocabulary, so no register needs to be filtered for - the endpoint has no
+# OBIS parameter at all.
 _REGISTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("1-1:1.9.0", "Daily Consumption", ("1-1:1.9.0 P.01", "1-1:1.9.0 G.01")),
-    ("1-1:2.9.0", "Daily Feed-in", ("1-1:2.9.0 P.01", "1-1:2.9.0 G.01")),
+    ("1-1:1.9.0", "Daily Consumption", ("1-1:1.9.0 G.01", "1-1:1.9.0 P.01")),
+    ("1-1:2.9.0", "Daily Feed-in", ("1-1:2.9.0 G.01", "1-1:2.9.0 P.01")),
     ("7-1:1.9.0", "Daily Gas Consumption", ("7-1:1.9.0 P.01",)),
 )
-
-# Codes requested per commodity. Sending the explicit list keeps the response
-# small; everything below is part of the modelled vocabulary.
-_ELECTRICITY_CODES = (
-    "1-1:1.9.0 P.01",
-    "1-1:1.9.0 G.01",
-    "1-1:2.9.0 P.01",
-    "1-1:2.9.0 G.01",
-)
-_GAS_CODES = ("7-1:1.9.0 P.01",)
 
 
 def _masked(value: str | None) -> str:
@@ -275,19 +297,74 @@ def _worst_quality(mix: dict[str, int]) -> str:
     return max(mix, key=lambda label: (QUALITY_RANK.get(label, 3), mix[label]))
 
 
-def _group_by_code(payload: Any) -> dict[str, list[dict[str, Any]]]:
+def _records(payload: Any) -> list[dict[str, Any]]:
+    """Return the records of a ``data_window`` response."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        raise SmartmeterQueryError(f"Unexpected data window payload: {payload!r}")
+    return [record for record in data if isinstance(record, dict)]
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    """Return a record's ``timestamp`` as an aware datetime, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        # The API documents UTC instants; one without an offset is read as UTC
+        # rather than as machine local time.
+        return moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def _local_day(moment: datetime) -> date:
+    """Return the Vienna day an instant belongs to."""
+    if TIMEZONE is not None:
+        return moment.astimezone(TIMEZONE).date()
+    # No time zone database (bare test environments): keep the offset the EU
+    # rule confirms for that wall time, which is what the two hours around
+    # midnight - the only ones that can change the day - depend on.
+    for hours in (2, 1):
+        wall = (moment + timedelta(hours=hours)).replace(tzinfo=None)
+        if _fallback_offset_hours(wall) == hours:
+            return wall.date()
+    return (moment + timedelta(hours=1)).date()
+
+
+def _group_by_code(
+    records: Iterable[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
     """Group ``data_window`` records by their OBIS code."""
     groups: dict[str, list[dict[str, Any]]] = {}
-    records = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(records, list):
-        raise SmartmeterQueryError(f"Unexpected data window payload: {payload!r}")
     for record in records:
-        if not isinstance(record, dict):
-            continue
         code = record.get("obis_code")
         if isinstance(code, str):
             groups.setdefault(code, []).append(record)
     return groups
+
+
+def _newest_day(
+    records: list[dict[str, Any]],
+) -> tuple[date | None, list[dict[str, Any]]]:
+    """Return the newest Vienna day of a register that carries readings.
+
+    Records without a readable timestamp are kept in the sum of their day only
+    if no other day can be found for the register, so a broken timestamp cannot
+    hide a complete day.
+    """
+    by_day: dict[date, list[dict[str, Any]]] = {}
+    for record in records:
+        moment = _parse_timestamp(record.get("timestamp"))
+        if moment is None:
+            continue
+        by_day.setdefault(_local_day(moment), []).append(record)
+    if not by_day:
+        return None, []
+    day = max(by_day)
+    return day, by_day[day]
 
 
 def _location_info(raw: dict[str, Any]) -> dict[str, Any]:
@@ -515,57 +592,86 @@ class EnergiedatenAtClient(SmartmeterClient):
     # ------------------------------------------------------------- readings
 
     def _fetch_window(
-        self, meter_id: str, codes: tuple[str, ...], day: date
-    ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-        """Return one local day of records, grouped by code, plus the envelope."""
-        date_from, date_until = _local_day_window(day)
-        url = f"{BASE_URL}/smart-meters/{quote(meter_id)}/data"
-        payload = self._get_json(
-            url,
-            params={
-                "from": date_from,
-                "to": date_until,
-                "obis_codes[]": list(codes),
-            },
-        )
+        self, meter_id: str, first: date, last: date
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Return one window of records plus the fields of its envelope.
 
+        The documented parameters of the endpoint are ``from``, ``to`` and
+        ``order``. The server caps a response at a number of records and flags
+        it with ``is_truncated``; ``next_cursor`` resumes it, and a resumed page
+        takes the cursor *instead of* the window parameters (they would clip the
+        pages that follow).
+        """
+        window_from, _ = _local_day_window(first)
+        _, window_until = _local_day_window(last)
+
+        url = f"{BASE_URL}/smart-meters/{quote(meter_id)}/data"
+        params: dict[str, Any] = {
+            "from": window_from,
+            "to": window_until,
+            "order": ORDER_ASC,
+        }
+
+        records: list[dict[str, Any]] = []
         window: dict[str, Any] = {}
-        if isinstance(payload, dict):
-            if payload.get("is_truncated"):
+        for _page in range(MAX_PAGES):
+            payload = self._get_json(url, params=params)
+            records.extend(_records(payload))
+
+            if isinstance(payload, dict):
+                # Optional fields of the response envelope. They describe the
+                # window as a whole, not a single register.
+                for key in ("data_completeness", "max_updated_at", "unit"):
+                    if payload.get(key) is not None:
+                        window[key] = payload[key]
+                if not payload.get("is_truncated"):
+                    return records, window
+                cursor = payload.get("next_cursor")
+            else:
+                return records, window
+
+            if not cursor:
                 LOGGER.warning(
-                    "energiedaten.at: the data window for %s on %s was truncated "
-                    "at %s records; the daily total may be incomplete",
-                    meter_id,
-                    day,
-                    SERVER_RECORD_CAP,
+                    "energiedaten.at: the data window for %s on %s to %s was "
+                    "truncated at %s records and carried no next_cursor; the "
+                    "daily total may be incomplete",
+                    meter_id, first, last, SERVER_RECORD_CAP,
                 )
-            # Optional fields of the response envelope; both follow the OBIS
-            # filter, so they describe the registers we asked for.
-            for key in ("data_completeness", "max_updated_at", "unit"):
-                if payload.get(key) is not None:
-                    window[key] = payload[key]
-        return _group_by_code(payload), window
+                return records, window
+
+            LOGGER.debug(
+                "energiedaten.at: the data window for %s was truncated at %s "
+                "records; resuming with the returned cursor",
+                meter_id, SERVER_RECORD_CAP,
+            )
+            params = {"cursor": cursor}
+
+        LOGGER.warning(
+            "energiedaten.at: stopped paging %s after %s pages", meter_id, MAX_PAGES
+        )
+        return records, window
 
     def historical_data(
         self, zaehlpunktnummer: str, date_from: date = None, date_until: date = None
     ) -> list[dict[str, Any]]:
-        """Return the consumption of one local day as OBIS readings.
+        """Return the newest day with readings in the window as OBIS readings.
 
         The API reports *energy per interval* (kWh), not a cumulative meter
-        reading, so the intervals are summed up and the reading is flagged as a
-        daily period value. Each OBIS register that carries data becomes one
-        reading block; a day without data returns an empty list, which leaves
-        the entity ``unknown`` instead of faking a zero.
+        reading, so the intervals of the reported day are summed up and the
+        reading is flagged as a daily period value. The default window reaches
+        ``LOOKBACK_DAYS`` back from ``date_until``, because data is delivered
+        day-after and can arrive later than that: the newest day the platform
+        holds is reported instead of a fixed "yesterday", so a late delivery does
+        not leave the sensors empty (issue #6). Each OBIS register that carries
+        data becomes one reading block; a window without data returns an empty
+        list, which leaves the entity ``unknown`` instead of faking a zero.
         """
         self._ensure_session()
 
         if date_until is None:
             date_until = date.today()
         if date_from is None:
-            date_from = date_until - timedelta(days=1)
-        # Data is delivered day-after, so one day per call is what matters; a
-        # wider range would only make the entity lie about its period.
-        day = date_from
+            date_from = date_until - timedelta(days=LOOKBACK_DAYS)
 
         meter = self._meter_resource(zaehlpunktnummer)
         meter_id = meter.get("id")
@@ -574,11 +680,12 @@ class EnergiedatenAtClient(SmartmeterClient):
                 f"The API returned no id for metering point {zaehlpunktnummer}."
             )
 
-        codes = _GAS_CODES if meter.get("commodity") == "gas" else _ELECTRICITY_CODES
-        groups, window = self._fetch_window(str(meter_id), codes, day)
+        records, window = self._fetch_window(str(meter_id), date_from, date_until)
+        groups = _group_by_code(records)
         if not groups:
             LOGGER.debug(
-                "energiedaten.at: no data for %s on %s", zaehlpunktnummer, day
+                "energiedaten.at: no data for %s between %s and %s",
+                zaehlpunktnummer, date_from, date_until,
             )
             return []
 
@@ -588,31 +695,35 @@ class EnergiedatenAtClient(SmartmeterClient):
             if source is None:
                 continue
 
-            records = groups[source]
-            total_kwh = _sum_interval_values(records)
+            day, day_records = _newest_day(groups[source])
+            if day is None:
+                continue
+
+            total_kwh = _sum_interval_values(day_records)
             if total_kwh is None:
                 continue
 
-            mix = _quality_mix(records)
-            first = min(record.get("timestamp") or "" for record in records)
+            mix = _quality_mix(day_records)
+            first = min(record.get("timestamp") or "" for record in day_records)
             last = max(
                 (record.get("timestamp_end") or record.get("timestamp") or "")
-                for record in records
+                for record in day_records
             )
 
             LOGGER.debug(
-                "energiedaten.at: %s %s -> %.3f kWh from %s interval(s) [%s]",
+                "energiedaten.at: %s %s -> %.3f kWh from %s interval(s) on %s [%s]",
                 zaehlpunktnummer,
                 source,
                 total_kwh,
-                len(records),
+                len(day_records),
+                day,
                 _worst_quality(mix),
             )
 
             reading: dict[str, Any] = {
                 # 1.9.0 / 2.9.0 are the OBIS codes for energy consumed within an
                 # interval, which is what the API reports. The cumulative meter
-                # register (1.8.0) is not exposed by the API at all.
+                # register (1.8.0) is not modelled here.
                 "obisCode": obis_code,
                 "name": name,
                 "wertetyp": VALUE_TYPE_DAY,
@@ -623,7 +734,8 @@ class EnergiedatenAtClient(SmartmeterClient):
                         "messwert": round(total_kwh * KWH_TO_WH, 3),
                         "status": "VALID",
                         "qualitaet": _worst_quality(mix),
-                        "intervals": len(records),
+                        "day": day.isoformat(),
+                        "intervals": len(day_records),
                         "period_from": first,
                         "period_to": last,
                         "source_obis_code": source,

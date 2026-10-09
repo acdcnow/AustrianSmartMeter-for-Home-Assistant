@@ -1,6 +1,6 @@
 # Austria Smartmeter Integration for Home Assistant
 
-![Version](https://img.shields.io/badge/version-1.2.0-green)
+![Version](https://img.shields.io/badge/version-1.2.1-green)
 [![Maintainer](https://img.shields.io/badge/maintainer-acdcnow-blue)](https://github.com/acdcnow)
 
 Retrieve energy data from Austrian grid operators directly into Home Assistant
@@ -24,6 +24,11 @@ via their web portals.
 ## ✨ Highlights
 
 * **Cloud polling:** fetches data automatically (default: every 6 hours).
+* **Ten providers behind one entry:** a portal login, an API key, a serial port or a
+  market area - the setup asks each provider only for what it needs.
+* **Reads that survive a late portal:** providers that publish their data a day late are
+  read over a window, so their sensors report the newest day that exists instead of
+  staying empty until the portal catches up.
 * **Automatic discovery:** finds all meters (consumption and production)
   associated with your account.
 * **Detailed diagnostics:** full technical details, including address, device IDs
@@ -33,13 +38,6 @@ via their web portals.
   that a portal publishes a day late (E-Werk Gösting), history included.
 * **Brand images included:** the integration ships its own icon and logo, so it
   shows up properly in the Home Assistant UI.
-
-## 📚 Documentation
-
-Full design and developer documentation is in the
-**[project wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki)**:
-Architecture Design Document, Software Design Document, workflow diagrams and a guide for
-adding new grid operators. The wiki also keeps the archived pre-2026.9 documentation.
 
 ## ⚠️ Important note
 
@@ -73,16 +71,11 @@ values back, a refresh at 12:05 fetches them.
 **energiedaten.at** is a data platform rather than a grid operator and is configured
 with an **API key** (*Integrations → API Keys* in its dashboard, scopes
 `smart-meters:read` and `data:read`) instead of a portal login. The metering point has
-to be added and consented there first - the integration only reads data.
-
-## 📚 Documentation
-
-Full documentation — the **Architecture Design Document (ADD)**, the **Software Design
-Document (SDD)**, the workflow diagrams (repository map generated with GitDiagram) and
-the provider guide — lives in the
-[project wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki).
-The wiki documents the current **1.2.x** line and keeps the **archived 1.1.8** design
-for users still on that release.
+to be added and consented there first - the integration only reads data. A poll reads
+the last seven days in one request and reports the newest day the platform actually
+holds, so a late delivery does not leave the sensors empty. Each register reads exactly
+one OBIS code, the meter-wide total where it exists - as the platform's own analyses do
+- and never adds the total and the grid figure together.
 
 ## Installation
 
@@ -90,6 +83,14 @@ for users still on that release.
 2. Restart Home Assistant.
 3. Go to **Settings → Devices & Services → Add Integration** and search for
    **Austria Smartmeter**.
+
+## 📚 Documentation
+
+Full documentation — the **Architecture Design Document (ADD)**, the **Software Design
+Document (SDD)**, the workflow diagrams and the provider guide — lives in the
+[project wiki](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki).
+The wiki documents the current **1.2.x** line and keeps the **archived 1.1.8** design
+for users still on that release.
 
 ---
 

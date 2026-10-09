@@ -16,5 +16,5 @@
         "dsmr-parser==1.11.1",
         "lxml"
     ],
-    "version": "1.2.0"
+    "version": "1.2.1"
 }

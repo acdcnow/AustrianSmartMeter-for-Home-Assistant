@@ -1,4 +1,26 @@
-"""Netz Niederösterreich (EVN) API client."""
+"""Netz Niederösterreich (EVN) API client.
+
+The portal is a ``/orchestration`` ASP.NET service that authenticates with a
+JSON POST and then keeps a **short lived session cookie**. Two details of that
+contract cost this client two bug reports, and both are handled here:
+
+* The login path is ``Authentication/Login``. A missing "i" made the portal
+  answer an HTML error page, so *every* setup attempt failed (issue #1).
+* The login **response body is not part of the contract**. The portal answers
+  HTTP 200 and sets the cookie; several revisions answer with an empty body, and
+  requiring JSON of it made setup fail again although the credentials were
+  accepted (issue #5). Only a non-200 status, a 401/403 or an explicit
+  ``{"success": false}`` is treated as a failed login.
+
+The consumption endpoint answers 15-minute values in kWh for one day
+(``ConsumptionRecord/Day``), and nothing else: the portal exposes no cumulative
+meter register, so the summed day is reported as a period value
+(``wertetyp == "DAY"``) rather than as a ``total_increasing`` meter reading. A
+meter in an energy community is answered with one record per community beside
+its own, which is why the meter's own record (the one without an ``ec_id``) is
+the one that is summed.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -35,6 +57,12 @@ LEGACY_METER_URL = f"{BASE_URL}/User/GetMeteringPointByAccountId"
 
 CONSUMPTION_RECORD_URL = f"{BASE_URL}/ConsumptionRecord/Day"
 
+# The ``context`` query parameter selects the portal's data context. Both
+# independent third party clients of this portal use ``2`` for the user and
+# metering point endpoints; ``5`` - what this client sent before - and the legacy
+# ``1`` are not used by either of them.
+API_CONTEXT = 2
+
 REQUEST_TIMEOUT = 30
 
 # The portal session cookie is short lived and the API does not expose its
@@ -67,6 +95,70 @@ def _decode_json(response: requests.Response, url: str) -> Any:
         ) from err
 
 
+def _optional_json(response: requests.Response, url: str) -> Any:
+    """Return the decoded JSON body, or None when the response carries none.
+
+    Used for the login endpoint, whose body is **not** part of the contract.
+    Several portal revisions answer the login call with HTTP 200 and an empty
+    body while they set the session cookie; others report a rejected login with
+    ``{"success": false}``. Neither may be turned into a decoding error.
+    """
+    if not response.content:
+        return None
+    try:
+        return response.json()
+    except ValueError:
+        snippet = " ".join(response.text.split())[:200]
+        LOGGER.debug("%s answered without JSON: %r", url, snippet)
+        return None
+
+
+def _base_record(payload: Any) -> Any:
+    """Return the meter's own record of a consumption response.
+
+    A metering point that takes part in an energy community is answered with one
+    record per community beside its own (those carry an ``ec_id``). Summing them
+    would count the same energy twice, so the record without an ``ec_id`` wins
+    and a response without one keeps its first record.
+    """
+    if not isinstance(payload, list):
+        return payload
+    if not payload:
+        return None
+    for record in payload:
+        if isinstance(record, dict) and not record.get("ec_id"):
+            return record
+    return payload[0]
+
+
+def _sum_consumption(payload: Any) -> float | None:
+    """Sum up the consumption values of a ConsumptionRecord/Day response.
+
+    The current portal returns a record holding parallel
+    ``peakDemandTimes``/``meteredValues`` arrays, an older revision returned a
+    ``consumptionRecords`` list. Both shapes are supported. ``None`` is returned
+    when the response contains no usable values at all.
+    """
+    record = _base_record(payload)
+    if record is None:
+        return None
+
+    values: list[float] = []
+    if isinstance(record, dict):
+        for value in record.get("meteredValues") or []:
+            if isinstance(value, (int, float)):
+                values.append(float(value))
+        for entry in record.get("consumptionRecords") or []:
+            if isinstance(entry, dict) and isinstance(
+                entry.get("value"), (int, float)
+            ):
+                values.append(float(entry["value"]))
+
+    if not values:
+        return None
+    return sum(values)
+
+
 def _normalise_metering_point(raw: Any) -> dict[str, Any]:
     """Convert a portal metering point into the shape the coordinator expects."""
     if not isinstance(raw, dict):
@@ -88,37 +180,6 @@ def _normalise_metering_point(raw: Any) -> dict[str, Any]:
         "consumptionType", "CONSUMING"
     )
     return info
-
-
-def _sum_consumption(payload: Any) -> float | None:
-    """Sum up the consumption values of a ConsumptionRecord/Day response.
-
-    The current portal returns a list of records holding parallel
-    ``peakDemandTimes``/``meteredValues`` arrays, an older revision returned a
-    ``consumptionRecords`` list. Both shapes are supported. ``None`` is returned
-    when the response contains no usable values at all.
-    """
-    if payload is None:
-        return None
-
-    records = payload if isinstance(payload, list) else [payload]
-    values: list[float] = []
-
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        for value in record.get("meteredValues") or []:
-            if isinstance(value, (int, float)):
-                values.append(float(value))
-        for entry in record.get("consumptionRecords") or []:
-            if isinstance(entry, dict) and isinstance(
-                entry.get("value"), (int, float)
-            ):
-                values.append(float(entry["value"]))
-
-    if not values:
-        return None
-    return sum(values)
 
 
 class NetzNoeClient(SmartmeterClient):
@@ -173,8 +234,18 @@ class NetzNoeClient(SmartmeterClient):
             raise SmartmeterConnectionError(f"Request to {url} failed: {err}") from err
 
     def _get_json(self, url: str, **kwargs: Any) -> Any:
-        """GET a URL and return its JSON body."""
+        """GET a URL and return its JSON body.
+
+        A session that the portal does not accept is reported as a login error,
+        not as a connection error: the config flow then shows "check your
+        credentials" instead of "could not connect".
+        """
         response = self._request("GET", url, **kwargs)
+        if response.status_code in (401, 403):
+            raise SmartmeterLoginError(
+                f"{url} rejected the session (HTTP {response.status_code}). "
+                "Check username and password."
+            )
         if response.status_code != 200:
             raise SmartmeterConnectionError(
                 f"{url} returned HTTP {response.status_code}."
@@ -184,7 +255,20 @@ class NetzNoeClient(SmartmeterClient):
     # ---------------------------------------------------------------- login
 
     def login(self):
-        """Establish a portal session."""
+        """Establish a portal session.
+
+        The portal answers this call with HTTP 200 and sets the session cookie;
+        its **body is not the contract**. Issue #5 reported exactly that: the
+        portal answers with an *empty* body, and refusing it made every single
+        setup attempt fail with "returned a non-JSON response (HTTP 200): ''"
+        although the credentials were accepted.
+
+        What the body is still good for is a rejection. A revision that reports
+        ``success: false`` is a credentials problem, and so is a 401/403. An
+        unreadable or empty body is accepted - the session cookie is what
+        counts - and the authenticated follow-up call in :meth:`zaehlpunkte`
+        decides the rest (it reports an unauthenticated call as a login error).
+        """
         LOGGER.debug("Netz NOE: authenticating user %s", self.username)
 
         response = self._request(
@@ -192,9 +276,6 @@ class NetzNoeClient(SmartmeterClient):
             LOGIN_URL,
             json={"user": self.username, "pwd": self.password},
         )
-        # A wrong URL or an expired portal answers with HTML, wrong credentials
-        # with a JSON body that reports success = false.
-        payload = _decode_json(response, LOGIN_URL)
 
         if response.status_code in (401, 403):
             raise SmartmeterLoginError("Login failed. Check username and password.")
@@ -202,8 +283,15 @@ class NetzNoeClient(SmartmeterClient):
             raise SmartmeterConnectionError(
                 f"Login endpoint returned HTTP {response.status_code}."
             )
-        if isinstance(payload, dict) and not payload.get("success", True):
+
+        payload = _optional_json(response, LOGIN_URL)
+        if isinstance(payload, dict) and payload.get("success") is False:
             raise SmartmeterLoginError("Login failed. Check username and password.")
+        if payload is None:
+            LOGGER.debug(
+                "Netz NOE: the login endpoint answered without a JSON body; "
+                "the session cookie is the contract"
+            )
 
         self._login_time = datetime.now()
         return self
@@ -231,7 +319,7 @@ class NetzNoeClient(SmartmeterClient):
     def _fetch_metering_points(self) -> list[dict[str, Any]]:
         """Fetch the metering points, trying the current API first."""
         try:
-            raw = self._get_json(METERING_POINTS_URL, params={"context": 5})
+            raw = self._get_json(METERING_POINTS_URL, params={"context": API_CONTEXT})
             if isinstance(raw, list) and raw:
                 metering_points = [_normalise_metering_point(item) for item in raw]
                 LOGGER.debug(
@@ -258,7 +346,7 @@ class NetzNoeClient(SmartmeterClient):
 
     def _fetch_metering_points_legacy(self) -> list[Any]:
         """Fetch the metering points through the pre-2026 two step API."""
-        accounts = self._get_json(LEGACY_ACCOUNT_URL, params={"context": 1})
+        accounts = self._get_json(LEGACY_ACCOUNT_URL, params={"context": API_CONTEXT})
         if not isinstance(accounts, list) or not accounts:
             raise SmartmeterQueryError("Portal returned no account for this login.")
 
@@ -267,7 +355,7 @@ class NetzNoeClient(SmartmeterClient):
             raise SmartmeterQueryError("Portal returned no account id for this login.")
 
         meters = self._get_json(
-            LEGACY_METER_URL, params={"accountId": account_id, "context": 1}
+            LEGACY_METER_URL, params={"accountId": account_id, "context": API_CONTEXT}
         )
         if not isinstance(meters, list):
             raise SmartmeterQueryError(f"Unexpected metering point response: {meters!r}")

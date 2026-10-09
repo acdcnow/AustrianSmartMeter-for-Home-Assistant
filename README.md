@@ -1,17 +1,36 @@
-# Austria Smartmeter Integration for Home Assistant
+# Austria Smartmeter for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+<img src="austria_smartmeter.jpg" alt="Smart meter readings from every Austrian grid operator, in Home Assistant" width="100%">
+
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-blue)](https://www.home-assistant.io/)
+[![Version](https://img.shields.io/badge/version-1.2.1-green)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Maintainer](https://img.shields.io/badge/maintainer-acdcnow-blue)](https://github.com/acdcnow)
-[![Version](https://img.shields.io/badge/version-1.2.0-green)]()
 
-A custom component for Home Assistant that retrieves energy data for Austrian smart
-meters: from the grid operators' web portals, from the local meter interfaces, and from
-the data platforms and price feeds around them.
+**One integration for Austrian smart meters.** It reads your energy data where it
+actually lives - in the grid operator's web portal, at the meter's own customer
+interface, on a meter-reading gateway or at an API platform - and brings it into Home
+Assistant as consumption, feed-in, power and price sensors, together with the long-term
+statistics the Energy dashboard needs.
 
-The integration uses **cloud polling** to fetch meter readings, consumption data
-and statistics.
+> **Requires Home Assistant 2026.9 or newer.** On an older Home Assistant, install the
+> [`1.1.8` tag](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/releases/tag/1.1.8).
 
-## ⚡ Supported Grid Operators
+## 📑 Table of contents
+
+- ⚡ [Supported providers](#-supported-providers)
+- ✨ [Features](#-features)
+- 🚀 [Installation](#-installation)
+- ⚙️ [Configuration](#-configuration)
+- 📊 [Entities & sensors](#-entities--sensors)
+- 🐛 [Troubleshooting & debugging](#-troubleshooting--debugging)
+- 📚 [Documentation](#-documentation)
+- 🗺️ [Roadmap](#-roadmap)
+- 📝 [Changelog](#-changelog)
+- 📄 [License](#-license)
+
+## ⚡ Supported Providers
 
 | Provider | Status | Notes |
 | :--- | :--- | :--- |
@@ -63,8 +82,18 @@ consents. The platform publishes 15-minute interval readings, which are summed u
 local day and reported as daily consumption/feed-in in Wh (the API exposes no cumulative
 meter register).
 
-> The adapter follows the platform's documented API and was verified with fixtures, not
-> against a live account.
+A poll reads **the last seven days in one request** and reports the newest day the
+platform actually holds, so a grid operator that delivers a day late - or several days
+late - does not leave the sensors empty. Each register reads exactly one OBIS code, and
+the meter-wide total (`G.01`) is preferred over the grid figure (`P.01`), because that is
+the one the platform's own analyses use; the two are never added up. The attributes of a
+sensor name the day it reports (`day`), where its data reaches (`period_from`,
+`period_to`) and the code it was read from (`source_obis_code`).
+
+> The adapter follows the platform's documented API. The window, the cursor pagination
+> and the client-side OBIS selection were verified against the reference implementation
+> the platform itself ships for Home Assistant, not against a live account of ours -
+> please keep reporting what your meter shows.
 
 ### DSMR / P1 customer interface (local)
 
@@ -346,8 +375,13 @@ days among the last four days (about two and a half days after the day).
 ## ✨ Features
 
 * **Easy setup:** configuration directly through the Home Assistant UI (config flow).
+* **Ten providers behind one entry:** a portal login, an API key, a serial port or a market
+  area - the setup asks each provider only for what it actually needs.
 * **Multi metering point support:** supports accounts with several metering points/addresses.
 * **Automatic detection:** detects consumption (1.8.0) and production/feed-in (2.8.0).
+* **Reads that survive a late portal:** a provider that publishes its data a day late is
+  read over a window, so its sensors report the newest day that exists instead of staying
+  empty until the portal catches up.
 * **Statistics:** daily consumption statistics ("Consumption Yesterday", "Consumption Day Before Yesterday") where the portal provides them.
 * **Long-term statistics with real timestamps:** values that a portal publishes a day late (E-Werk Gösting) go into Home Assistant's long-term statistics hour by hour, with their history, for the Energy dashboard.
 * **Diagnostics:** detailed technical information exposed as diagnostic entities:
@@ -377,7 +411,7 @@ The documents describe the **1.2.x line**, which is what this release belongs to
 require Home Assistant **2026.9** or newer. If you are still running **1.1.8** (an older
 Home Assistant), install it from the `1.1.8` tag and read the archived documentation.
 
-##  Installation
+## 🚀 Installation
 
 ### Option 1: Via HACS (recommended)
 
@@ -485,10 +519,53 @@ the smart meter portal yet.
 something that was not JSON (for example an HTML error page). The debug log
 contains the HTTP status code and a snippet of the response.
 
+**"energiedaten.at: no data for … between … and …"** – the API answered the window
+without a single record. That is a platform-side statement, not a failure of the
+integration: the metering point's consent is not `connected` yet, or the grid operator
+has not delivered that period. *Integrations → API Keys* and the smart meter page of the
+energiedaten.at dashboard tell you which of the two it is.
+
+**"energiedaten.at: the data window … was truncated …"** – a warning, not an error: the
+window held more records than the server returns in one response, and the integration
+resumed it with the cursor the API sent. The daily total stays complete unless the log
+says it carried no cursor.
+
+**Netz Niederösterreich: "check username and password"** – the portal rejected the
+session (HTTP 401/403) or answered the login with `success: false`. The portal's own
+login page in a browser is the quickest way to tell a wrong password from an account
+that has no smart meter portal access yet.
+
+**Netz Niederösterreich: "returned a non-JSON response"** – the portal answered a data
+request with something that was not JSON, which is its way of saying that the session is
+not established. With 1.2.1 and newer this can no longer happen during setup: the login
+endpoint's body is no longer required to be JSON. Please report it if you still see it.
+
 ## 📝 Changelog
 
-### Unreleased
+The full history of this integration is in **[CHANGELOG.md](CHANGELOG.md)**.
 
+### 1.2.1
+
+* **The `energiedaten.at` provider reads data again (issue #6).** The adapter sent an
+  `obis_codes[]` filter that the documented data endpoint does not have, and asked for
+  one hard-coded day per poll. A poll now reads the last seven days in one request -
+  `from`, `to` and the `order` parameter the platform's own Home Assistant integration
+  sends - follows the `is_truncated`/`next_cursor` pagination of the server's record cap,
+  selects the OBIS codes client-side, and reports the newest day that actually carries
+  readings. It also prefers the meter-wide total (`G.01`) over the grid figure (`P.01`),
+  as the platform's own analyses do, instead of the other way round. A "no data" log line
+  now names the whole window that was read, and every reading carries the day it belongs
+  to.
+* **The Netz Niederösterreich setup no longer fails at the login (issue #5).** The portal
+  answers `POST /orchestration/Authentication/Login` with HTTP 200 and an *empty* body
+  while it sets the session cookie; requiring JSON of that body made every setup attempt
+  fail with `returned a non-JSON response (HTTP 200): ''`. HTTP 200 is now accepted as the
+  success it is - only a non-200 status, a 401/403 or an explicit `{"success": false}` is
+  a failed login - and an unauthenticated data call is reported as a credentials problem
+  instead of a connection problem, so the config flow shows the right message. The
+  metering point endpoints are asked with `context=2`, the context both independent
+  third-party clients of this portal use, and a meter that is in an energy community no
+  longer has its own record and its community records summed up together.
 * **E-Werk Gösting** - the customer portal on mein-portal.at, read with the portal
   account's e-mail address and password. Every active Anlage of the account becomes a
   device with the consumption of the latest day that counts as final, in Wh
@@ -565,6 +642,35 @@ Selectra, Salzburg Netz) say so in their section above.
   Home Assistant Core.
 * Fixed the integration name typo and several documentation issues.
 
+## 🗺️ Roadmap
+
+| Item | State |
+| :--- | :--- |
+| **Stromnetz Graz** - grid operator | 🚧 in development |
+| **e-netze.at** | 💡 proposed |
+| **Salzburg Netz** - the `readings`, `consumption` and `partner` categories | 💡 open |
+| **E-Werk Gösting** - feed-in Anlagen verified against a real one | 💡 open |
+| **energiedaten.at** - reporting the community share next to the total | 💡 open |
+
+Ideas, providers and pull requests are welcome. The
+[provider guide](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/wiki/Adding-a-New-Provider)
+walks through everything a new provider needs, and the
+[issue tracker](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues)
+is the place for what is missing.
+
+## 🙏 Acknowledgements
+
+* [energiedaten.at](https://energiedaten.at/docs/api) publishes the API contract the
+  `energiedaten.at` provider follows and ships
+  [its own Home Assistant integration](https://github.com/energiedaten-at/ha-energiedaten).
+  The window parameters, the cursor pagination and the client-side OBIS selection of this
+  adapter are aligned with it.
+* The Netz Niederösterreich portal has no published API. Its login contract was pinned
+  down with the two independent implementations that talk to the same endpoints,
+  [TobiKr/hass-NetzNOESmartMeter](https://github.com/TobiKr/hass-NetzNOESmartMeter) and
+  [schue30/NetzNoe-SmartmeterPortal-Api](https://github.com/schue30/NetzNoe-SmartmeterPortal-Api).
+* The brand images are built from this project's own banner, `austria_smartmeter.jpg`.
+
 ## ⚠️ Disclaimer
 
 This is a private community project and is not officially affiliated with Wiener
@@ -573,4 +679,5 @@ risk. The provider APIs may change at any time.
 
 ## 📄 License
 
-MIT License
+[GNU General Public License v3.0](LICENSE) — the licence the `LICENSE` file of this
+repository ships.
