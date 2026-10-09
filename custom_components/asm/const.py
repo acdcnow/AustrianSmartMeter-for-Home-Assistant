@@ -49,6 +49,7 @@ PROVIDER_DSMR = "dsmr"
 PROVIDER_AWATTAR = "awattar"
 PROVIDER_SELECTRA = "selectra"
 PROVIDER_SALZBURGNETZ = "salzburgnetz"
+PROVIDER_EWERK_GOESTING = "ewerk_goesting"
 PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 
 PROVIDERS = {
@@ -60,6 +61,7 @@ PROVIDERS = {
     PROVIDER_AWATTAR: "aWATTar market prices",
     PROVIDER_SELECTRA: "Selectra tariff planning",
     PROVIDER_SALZBURGNETZ: "Salzburg Netz",
+    PROVIDER_EWERK_GOESTING: "E-Werk Gösting",
     # PROVIDER_STROMNETZ_GRAZ: "Stromnetz Graz", # In Entwicklung
 }
 
@@ -110,6 +112,7 @@ __all__ = [
     "PROVIDER_DSMR",
     "PROVIDER_ENERGIEDATEN",
     "PROVIDER_ENERGYLIVE",
+    "PROVIDER_EWERK_GOESTING",
     "PROVIDER_NETZ_NOE",
     "PROVIDER_SALZBURGNETZ",
     "PROVIDER_SELECTRA",

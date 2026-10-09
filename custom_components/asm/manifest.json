@@ -1,6 +1,9 @@
 {
     "domain": "asm",
     "name": "Austria Smartmeter",
+    "after_dependencies": [
+        "recorder"
+    ],
     "codeowners": [
         "@acdcnow"
     ],

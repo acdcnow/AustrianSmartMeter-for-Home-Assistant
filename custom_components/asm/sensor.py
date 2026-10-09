@@ -1,6 +1,7 @@
 """Sensor platform for Austria Smartmeter."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -14,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -24,6 +26,7 @@ from .const import (
     PROVIDER_DSMR,
     PROVIDER_ENERGIEDATEN,
     PROVIDER_ENERGYLIVE,
+    PROVIDER_EWERK_GOESTING,
     PROVIDER_NETZ_NOE,
     PROVIDER_WIENER_NETZE,
 )
@@ -35,6 +38,18 @@ _PERIOD_VALUE_TYPES = {"DAY", "CONSUMPTION", "QUARTER_HOUR"}
 
 # Only devices with this state class may carry a `last_reset` attribute.
 _PERIOD_STATE_CLASS = SensorStateClass.TOTAL
+
+# Keys of the latest entry of a reading that are not repeated as latest_<key>
+# attributes.
+_LATEST_SKIPPED = frozenset(
+    {"messwert", "value", "amount", "qualitaet", "status", "validated"}
+)
+# The entries of a reading that carries a statistic_id are the totals of whole
+# days; whether the latest day is validated (complete and measured) is kept.
+_LATEST_SKIPPED_STATISTIC = _LATEST_SKIPPED - {"validated"}
+
+# The consumption registers, whose statistic the "Latest Data" entity names.
+_CONSUMPTION_OBIS = ("1-1:1.9.0", "1-1:1.8.0")
 
 # Instantaneous power. Power is a measurement, not a counter, whatever the
 # provider's value type says.
@@ -52,6 +67,10 @@ _PROVIDER_PORTALS = {
         "Salzburg Netz",
         "https://www.salzburgnetz.at/service/serviceportal/"
         "programmierschnittstelle.html",
+    ),
+    PROVIDER_EWERK_GOESTING: (
+        "E-Werk Gösting",
+        "https://goesting-dav.mein-portal.at/bkp/login",
     ),
 }
 
@@ -96,6 +115,11 @@ async def async_setup_entry(
                 entities.append(
                     AustriaSmartMeterSensor(coordinator, zp_num, reading_data, info)
                 )
+
+        # 1b. How far the data reaches, for readings that say so (data_until):
+        # one timestamp per metering point.
+        if any(isinstance(reading, dict) and "data_until" in reading for reading in readings):
+            entities.append(AustriaSmartMeterDataUntil(coordinator, zp_num, info))
 
         # 2. Diagnostic Sensors (Static Info & Address)
         if "zaehlpunktnummer" in info:
@@ -238,6 +262,13 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             self._attr_native_unit_of_measurement = self._unit
             self._attr_state_class = SensorStateClass.MEASUREMENT
 
+        if obis_data.get("statistic_id"):
+            # The provider's values reach the long-term statistics under this
+            # statistic_id, with their real timestamps (statistics.py).
+            # Statistics compiled from the entity's state would record them at
+            # poll time, so the entity has no state class.
+            self._attr_state_class = None
+
         # Naming
         meter_name = _get_clean_meter_name(info)
         self._attr_name = f"{meter_name} {readable_obis}"
@@ -299,6 +330,15 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             "obis_code": self._obis_code,
             "raw_unit": data.get("einheit") or "Wh (assumed)",
         }
+        statistic_id = data.get("statistic_id")
+        if statistic_id:
+            attributes["statistic_id"] = statistic_id
+            if data.get("history_start"):
+                attributes["history_start"] = data["history_start"]
+        # How far the values reach, and those held back until they are final.
+        for key in ("data_until", "held_back", "settles_at"):
+            if key in data:
+                attributes[key] = data[key]
 
         info = self.coordinator.data.get(self._zaehlpunkt, {}).get("info", {})
         for key, value in info.items():
@@ -321,8 +361,9 @@ class AustriaSmartMeterSensor(CoordinatorEntity[AustriaSmartMeterCoordinator], S
             )
             attributes["validation_status"] = latest.get("qualitaet") or latest.get("status")
 
+            skipped = _LATEST_SKIPPED_STATISTIC if statistic_id else _LATEST_SKIPPED
             for key, value in latest.items():
-                if key not in ["messwert", "value", "amount", "qualitaet", "status", "validated"]:
+                if key not in skipped:
                     attributes[f"latest_{key}"] = value
         return attributes
 
@@ -349,6 +390,65 @@ class AustriaSmartMeterDiagnostic(
         )
 
 
+class AustriaSmartMeterDataUntil(
+    CoordinatorEntity[AustriaSmartMeterCoordinator], SensorEntity
+):
+    """Diagnostic timestamp: how far the data of a metering point reaches.
+
+    For readings that name the end of their newest value (``data_until``), such as
+    a portal that publishes a day only on the next day. The state follows every
+    poll: the newest ``data_until`` of the metering point's readings.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(self, coordinator, zaehlpunkt, info) -> None:
+        super().__init__(coordinator)
+        self._zaehlpunkt = zaehlpunkt
+        self._attr_name = f"{_get_clean_meter_name(info)} Latest Data"
+        self._attr_unique_id = f"{zaehlpunkt}_data_until"
+        self._attr_device_info = _get_shared_device_info(
+            zaehlpunkt, info, coordinator.provider
+        )
+
+    def _readings(self) -> list[dict[str, Any]]:
+        """Return the current readings of the metering point."""
+        readings = self.coordinator.data.get(self._zaehlpunkt, {}).get("readings", [])
+        if isinstance(readings, dict):
+            readings = [readings]
+        return [reading for reading in readings or [] if isinstance(reading, dict)]
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the newest ``data_until``; None when none can be parsed."""
+        newest: datetime | None = None
+        for reading in self._readings():
+            value = reading.get("data_until")
+            if not isinstance(value, str):
+                continue
+            try:
+                moment = dt_util.parse_datetime(value)
+            except ValueError:  # well formed, but no valid date
+                moment = None
+            # A timestamp needs its offset; the newest instant wins.
+            if moment is not None and moment.tzinfo is not None:
+                if newest is None or moment > newest:
+                    newest = moment
+        return newest
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the statistic of the consumption reading, if it has one."""
+        for reading in self._readings():
+            if reading.get("obisCode") in _CONSUMPTION_OBIS and reading.get(
+                "statistic_id"
+            ):
+                return {"statistic_id": reading["statistic_id"]}
+        return {}
+
+
 class AustriaSmartMeterStatistic(
     CoordinatorEntity[AustriaSmartMeterCoordinator], SensorEntity
 ):
@@ -365,8 +465,13 @@ class AustriaSmartMeterStatistic(
         self._attr_name = f"{meter_name} {name_suffix}"
         self._attr_unique_id = f"{zaehlpunkt}_stat_{key_id}"
         self._attr_device_class = SensorDeviceClass.ENERGY
-        # Daily values, not a cumulative meter reading.
-        self._attr_state_class = _PERIOD_STATE_CLASS
+        # Daily values, not a cumulative meter reading. A provider that imports
+        # the consumption into long-term statistics (statistic_id) records it
+        # with its real timestamps; the entity then compiles no statistics.
+        stats = coordinator.data.get(zaehlpunkt, {}).get("stats", {})
+        self._attr_state_class = (
+            None if (stats or {}).get("statistic_id") else _PERIOD_STATE_CLASS
+        )
         self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
         self._attr_device_info = _get_shared_device_info(
             zaehlpunkt, info, coordinator.provider
@@ -388,10 +493,13 @@ class AustriaSmartMeterStatistic(
         data = (stats or {}).get(self._key_id)
         if not data:
             return {}
-        return {
+        attributes = {
             "date": data.get("date"),
             "validated": data.get("validated"),
         }
+        if statistic_id := (stats or {}).get("statistic_id"):
+            attributes["statistic_id"] = statistic_id
+        return attributes
 
 
 def _state_class_for(obis_data: dict[str, Any]) -> SensorStateClass:
