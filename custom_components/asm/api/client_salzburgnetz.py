@@ -59,8 +59,9 @@ The consumption and feed-in registers therefore also carry their quarter hours a
 imports them into Home Assistant's long-term statistics with their real timestamps,
 which is what the Energy dashboard uses - the entity itself only shows the most
 recent quarter hour of a load profile that is published once a day. The first
-import reads the history a month at a time from ``history_start`` on, the oldest
-day the API still accepts. Those reads are not cached: each month is read once.
+import reads the history a month at a time from ``history_start`` on, one year back
+(IMPORT_YEARS; the API would accept three, but it limits the requests per 24
+hours). Those reads are not cached: each month is read once.
 """
 from __future__ import annotations
 
@@ -168,6 +169,11 @@ _STATISTIC_REGISTERS = {
 # How far back the API accepts an AB date. The history starts a day later, so a
 # read that begins on that day is not refused while the day changes.
 HISTORY_YEARS = 3
+
+# How far back the first statistics import reads: one year, 13 monthly reads. The
+# API would hand out three, but it limits the requests per 24 hours, and 37 reads
+# on top of the daily polls reach that limit.
+IMPORT_YEARS = 1
 
 # The suffix an Austrian load profile uses to name the direction: "P" for Bezug,
 # "G" for Einspeisung. It does not change which register is meant.
@@ -691,12 +697,15 @@ def _statistic_id(zaehlpunkt: str, register: str) -> str:
     return f"{STATISTIC_SOURCE}:{slug}_{register}"
 
 
-def _history_start(today: date) -> date:
-    """Return the oldest day whose load profile the API still hands out."""
+def _history_start(today: date, years: int = HISTORY_YEARS) -> date:
+    """Return the day after the same day ``years`` years back.
+
+    With the default, the oldest day whose load profile the API still hands out.
+    """
     try:
-        floor = today.replace(year=today.year - HISTORY_YEARS)
+        floor = today.replace(year=today.year - years)
     except ValueError:  # 29 February
-        floor = today.replace(year=today.year - HISTORY_YEARS, day=28)
+        floor = today.replace(year=today.year - years, day=28)
     return floor + timedelta(days=1)
 
 
@@ -715,7 +724,7 @@ def _add_statistics(
     suffix, label = register
     reading["statistic_id"] = _statistic_id(zaehlpunkt, suffix)
     reading["statistic_name"] = f"{name} {label}"
-    reading["history_start"] = _history_start(_today()).isoformat()
+    reading["history_start"] = _history_start(_today(), IMPORT_YEARS).isoformat()
     reading["intervals"] = [
         {"start": entry["zeitpunkt"], "wh": entry["messwert"], "status": entry["status"]}
         for entry in reading["messwerte"]
