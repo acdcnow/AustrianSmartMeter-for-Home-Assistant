@@ -88,6 +88,9 @@ EQUIPMENT_URL = f"{BASE_URL}/equipment"
 
 REQUEST_TIMEOUT = 30
 
+# How long no request is sent after the API answered HTTP 429.
+THROTTLE_PAUSE = timedelta(hours=6)
+
 # The API can answer in json, csv or xml; json is its own default and the only one
 # this adapter reads.
 DATA_FORMAT = "json"
@@ -824,6 +827,9 @@ class SalzburgNetzClient(SmartmeterClient):
         self._device_details: dict[str, dict[str, Any]] = {}
         self._device_details_day: date | None = None
         self._profiles: dict[tuple[str, str, str], tuple[date, list[dict[str, Any]]]] = {}
+        # After an HTTP 429 (the API's limit per 24 hours) no request is sent until
+        # this moment: every poll and every statistics import would hit it again.
+        self._throttled_until: datetime | None = None
 
     # -------------------------------------------------------------- session
 
@@ -903,6 +909,13 @@ class SalzburgNetzClient(SmartmeterClient):
 
     def _post(self, url: str, body: dict[str, Any]) -> Any:
         """POST a request body and return the parsed response."""
+        now = datetime.now(timezone.utc)
+        if self._throttled_until is not None and now < self._throttled_until:
+            raise SmartmeterConnectionError(
+                f"{url} not requested: the API's request limit per 24 hours was "
+                f"reached, the next request goes out after "
+                f"{self._throttled_until.astimezone(_vienna()):%Y-%m-%d %H:%M}"
+            )
         try:
             response = self.session.request(
                 "POST", url, json=body, timeout=REQUEST_TIMEOUT
@@ -947,6 +960,9 @@ class SalzburgNetzClient(SmartmeterClient):
                 f"{text} (the key has no rights for this customer number)"
             )
         if response.status_code == 429:
+            # Verified live: "Maximale Anzahl an Abfragen je 24 Stunden
+            # überschritten." The window is rolling, so the pause is a fraction of it.
+            self._throttled_until = now + THROTTLE_PAUSE
             raise SmartmeterConnectionError(
                 f"{text} (too many requests, retry later)"
             )
