@@ -1044,7 +1044,7 @@ class SalzburgNetzClient(SmartmeterClient):
         """Return the load profile records of a period, cached for the day.
 
         A history read (``cache`` False) is neither cached - the first statistics
-        import reads up to three years, a month at a time, and each month only once
+        import reads its history a month at a time, and each month only once
         - nor warned about when empty: a month before the meter delivered values
         has none.
         """
