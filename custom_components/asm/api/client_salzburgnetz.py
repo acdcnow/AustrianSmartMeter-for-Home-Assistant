@@ -89,8 +89,10 @@ EQUIPMENT_URL = f"{BASE_URL}/equipment"
 
 REQUEST_TIMEOUT = 30
 
-# How long no request is sent after the API answered HTTP 429.
-THROTTLE_PAUSE = timedelta(hours=6)
+# How long no request is sent after the API answered HTTP 429. Just under the
+# default poll interval of six hours: a pause of exactly six hours ends a fraction
+# of a second after the next poll, which then skips another six hours.
+THROTTLE_PAUSE = timedelta(hours=5, minutes=50)
 
 # The API can answer in json, csv or xml; json is its own default and the only one
 # this adapter reads.
