@@ -46,6 +46,22 @@ written to be tolerant instead of clever:
 
 A shape that none of these recognise yields an empty result plus a warning rather
 than a wrong number, and the metering point numbers can always be entered by hand.
+
+Verified live (2026-10): the JSON answer is a bare list of records with the keys
+of the CSV columns (``Datum`` "12.10.2026", ``Uhrzeit`` "00:00:00", ``UTC`` "+2",
+``OBIS`` "1-1:1.9.0 P.01", ``Wert`` "0,322…", ``Einheit`` "kWh"). ``Uhrzeit`` is
+the **start** of the quarter hour: a day runs from 00:00:00 to 23:45:00, 96 values.
+``BIS`` is inclusive, and an ``AB`` more than three years back is refused with
+HTTP 400 ("AB darf nicht länger als 3 Jahre zurückliegen.").
+
+The consumption and feed-in registers therefore also carry their quarter hours as
+``intervals``, with a ``statistic_id`` (``asm:<Zählpunkt>_consumption``): statistics.py
+imports them into Home Assistant's long-term statistics with their real timestamps,
+which is what the Energy dashboard uses - the entity itself only shows the most
+recent quarter hour of a load profile that is published once a day. The first
+import reads the history a month at a time from ``history_start`` on, one year back
+(IMPORT_YEARS; the API would accept three, but it limits the requests per 24
+hours). Those reads are not cached: each month is read once.
 """
 from __future__ import annotations
 
@@ -72,6 +88,11 @@ ANLAGE_URL = f"{BASE_URL}/anlage"
 EQUIPMENT_URL = f"{BASE_URL}/equipment"
 
 REQUEST_TIMEOUT = 30
+
+# How long no request is sent after the API answered HTTP 429. Just under the
+# default poll interval of six hours: a pause of exactly six hours ends a fraction
+# of a second after the next poll, which then skips another six hours.
+THROTTLE_PAUSE = timedelta(hours=5, minutes=50)
 
 # The API can answer in json, csv or xml; json is its own default and the only one
 # this adapter reads.
@@ -138,6 +159,23 @@ _ROW_KEYS = ("rows", "zeilen", "data", "records", "entries", "werte", "values")
 
 # Energy units, as reported by the documented example ("kWh").
 _UNIT_FACTORS = {"wh": 1.0, "kwh": 1000.0, "mwh": 1_000_000.0, "gwh": 1_000_000_000.0}
+
+# The long-term statistics of the registers that are energy counters (statistics.py):
+# OBIS code -> (statistic id suffix, label), as for E-Werk Gösting.
+STATISTIC_SOURCE = "asm"
+_STATISTIC_REGISTERS = {
+    "1-1:1.9.0": ("consumption", "Consumption"),
+    "1-1:2.9.0": ("production", "Production"),
+}
+
+# How far back the API accepts an AB date. The history starts a day later, so a
+# read that begins on that day is not refused while the day changes.
+HISTORY_YEARS = 3
+
+# How far back the first statistics import reads: one year, 13 monthly reads. The
+# API would hand out three, but it limits the requests per 24 hours, and 37 reads
+# on top of the daily polls reach that limit.
+IMPORT_YEARS = 1
 
 # The suffix an Austrian load profile uses to name the direction: "P" for Bezug,
 # "G" for Einspeisung. It does not change which register is meant.
@@ -650,12 +688,62 @@ def _equipment_info(payload: Any) -> dict[str, Any]:
     return info
 
 
-def _readings_from_profile(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _statistic_id(zaehlpunkt: str, register: str) -> str:
+    """Return the id of a register's long-term statistic.
+
+    The Zählpunkt in lower case, with every run of characters other than a-z and
+    0-9 turned into one underscore, e.g.
+    ``asm:at0040000573100000000000001234567_consumption``.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", zaehlpunkt.lower()).strip("_")
+    return f"{STATISTIC_SOURCE}:{slug}_{register}"
+
+
+def _history_start(today: date, years: int = HISTORY_YEARS) -> date:
+    """Return the day after the same day ``years`` years back.
+
+    With the default, the oldest day whose load profile the API still hands out.
+    """
+    try:
+        floor = today.replace(year=today.year - years)
+    except ValueError:  # 29 February
+        floor = today.replace(year=today.year - years, day=28)
+    return floor + timedelta(days=1)
+
+
+def _add_statistics(
+    reading: dict[str, Any], zaehlpunkt: str, name: str
+) -> None:
+    """Add the fields statistics.py imports to a consumption or feed-in reading.
+
+    Its ``intervals`` are its quarter hours with their real start; statistics.py
+    sums them per hour and only takes complete hours, so a day that is still
+    being published is held back until it is complete.
+    """
+    register = _STATISTIC_REGISTERS.get(reading["obisCode"])
+    if register is None:
+        return
+    suffix, label = register
+    reading["statistic_id"] = _statistic_id(zaehlpunkt, suffix)
+    reading["statistic_name"] = f"{name} {label}"
+    reading["history_start"] = _history_start(_today(), IMPORT_YEARS).isoformat()
+    reading["intervals"] = [
+        {"start": entry["zeitpunkt"], "wh": entry["messwert"], "status": entry["status"]}
+        for entry in reading["messwerte"]
+    ]
+
+
+def _readings_from_profile(
+    records: list[dict[str, Any]],
+    zaehlpunkt: str | None = None,
+    name: str | None = None,
+) -> list[dict[str, Any]]:
     """Turn load profile records into the integration's reading contract.
 
     One reading per register (consumption, feed-in, …), each carrying every value
     of the requested period, oldest first - the sensor platform reports the most
-    recent one and charts the rest.
+    recent one and charts the rest. With the metering point given, the energy
+    registers also carry what the long-term statistics import needs.
     """
     readings: dict[str, dict[str, Any]] = {}
     day_totals: dict[tuple[str, date], float] = {}
@@ -707,6 +795,8 @@ def _readings_from_profile(records: list[dict[str, Any]]) -> list[dict[str, Any]
                 entry["day_total_wh"] = round(total, 3)
         reading["messwerte"] = [entry for entry, _ in values]
         reading["records_read"] = len(values)
+        if zaehlpunkt:
+            _add_statistics(reading, zaehlpunkt, name or zaehlpunkt)
     return [readings[obis] for obis in sorted(readings)]
 
 
@@ -748,6 +838,9 @@ class SalzburgNetzClient(SmartmeterClient):
         self._device_details: dict[str, dict[str, Any]] = {}
         self._device_details_day: date | None = None
         self._profiles: dict[tuple[str, str, str], tuple[date, list[dict[str, Any]]]] = {}
+        # After an HTTP 429 (the API's limit per 24 hours) no request is sent until
+        # this moment: every poll and every statistics import would hit it again.
+        self._throttled_until: datetime | None = None
 
     # -------------------------------------------------------------- session
 
@@ -827,6 +920,13 @@ class SalzburgNetzClient(SmartmeterClient):
 
     def _post(self, url: str, body: dict[str, Any]) -> Any:
         """POST a request body and return the parsed response."""
+        now = datetime.now(timezone.utc)
+        if self._throttled_until is not None and now < self._throttled_until:
+            raise SmartmeterConnectionError(
+                f"{url} not requested: the API's request limit per 24 hours was "
+                f"reached, the next request goes out after "
+                f"{self._throttled_until.astimezone(_vienna()):%Y-%m-%d %H:%M}"
+            )
         try:
             response = self.session.request(
                 "POST", url, json=body, timeout=REQUEST_TIMEOUT
@@ -871,6 +971,9 @@ class SalzburgNetzClient(SmartmeterClient):
                 f"{text} (the key has no rights for this customer number)"
             )
         if response.status_code == 429:
+            # Verified live: "Maximale Anzahl an Abfragen je 24 Stunden
+            # überschritten." The window is rolling, so the pause is a fraction of it.
+            self._throttled_until = now + THROTTLE_PAUSE
             raise SmartmeterConnectionError(
                 f"{text} (too many requests, retry later)"
             )
@@ -937,14 +1040,29 @@ class SalzburgNetzClient(SmartmeterClient):
 
     # ------------------------------------------------------------- readings
 
-    def _profile_records(self, identifier: str, ab: str, bis: str) -> list[dict[str, Any]]:
-        """Return the load profile records of a period, cached for the day."""
+    def _profile_records(
+        self, identifier: str, ab: str, bis: str, cache: bool = True
+    ) -> list[dict[str, Any]]:
+        """Return the load profile records of a period, cached for the day.
+
+        A history read (``cache`` False) is neither cached - the first statistics
+        import reads its history a month at a time, and each month only once
+        - nor warned about when empty: a month before the meter delivered values
+        has none.
+        """
         cache_key = (identifier, ab, bis)
         cached = self._profiles.get(cache_key)
         if cached is not None and cached[0] == _today():
             return cached[1]
 
         records = _records(self._post(PROFILE_URL, self._body(identifier, ab, bis)))
+        if not cache:
+            if not records:
+                LOGGER.debug(
+                    "Salzburg Netz: no load profile of %s for %s to %s",
+                    identifier, ab, bis,
+                )
+            return records
         if not records:
             LOGGER.warning(
                 "Salzburg Netz: the load profile of %s for %s to %s held no record "
@@ -967,20 +1085,28 @@ class SalzburgNetzClient(SmartmeterClient):
         operator publishes a day between 10:00 and 12:00), today is still filling
         up, and the most recent value is the one the sensors show.
 
-        The period is read at most once per day, as the operator asks.
+        The period is read at most once per day, as the operator asks. An explicit
+        period is a history read of the statistics import (statistics.py): it is not
+        cached, and it starts no earlier than the API accepts.
         """
         self._ensure_session()
         identifier = str(zaehlpunktnummer or "").strip()
         if not identifier:
             raise SmartmeterQueryError("No metering point given.")
 
+        history = date_from is not None or date_until is not None
+        if history and isinstance(date_from, date):
+            date_from = max(date_from, _history_start(_today()))
         ab = _iso_date(date_from) or _iso_date(_today() - timedelta(days=1))
         bis = _iso_date(date_until) or _iso_date(_today())
         if ab and bis and ab > bis:
             ab, bis = bis, ab
 
-        records = self._profile_records(identifier, ab or "", bis or "")
-        return _readings_from_profile(records)
+        records = self._profile_records(
+            identifier, ab or "", bis or "", cache=not history
+        )
+        name = (self._found.get(identifier) or {}).get("zaehlpunktName") or "Smart Meter"
+        return _readings_from_profile(records, identifier, name)
 
     def consumptions(self) -> list[dict[str, Any]]:
         """A load profile has no ready made statistics.
