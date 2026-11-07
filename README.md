@@ -25,6 +25,7 @@ statistics the Energy dashboard needs.
 - ⚙️ [Configuration](#-configuration)
 - 📊 [Entities & sensors](#-entities--sensors)
 - 🐛 [Troubleshooting & debugging](#-troubleshooting--debugging)
+- 🧪 [Tests](#-tests)
 - 📚 [Documentation](#-documentation)
 - 🗺️ [Roadmap](#-roadmap)
 - 📝 [Changelog](#-changelog)
@@ -539,6 +540,18 @@ that has no smart meter portal access yet.
 request with something that was not JSON, which is its way of saying that the session is
 not established. With 1.2.1 and newer this can no longer happen during setup: the login
 endpoint's body is no longer required to be JSON. Please report it if you still see it.
+
+## 🧪 Tests
+
+The tests in `tests/` use Home Assistant's test harness
+(`pytest-homeassistant-custom-component`). They cover the setup and the options of every
+provider:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements_test.txt
+.venv/bin/python -m pytest
+```
 
 ## 📝 Changelog
 
