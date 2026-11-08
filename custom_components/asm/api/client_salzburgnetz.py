@@ -975,7 +975,8 @@ def _add_statistics(
         return
     suffix, label = register
     reading["statistic_id"] = _statistic_id(zaehlpunkt, suffix)
-    reading["statistic_name"] = f"{name} {label}"
+    # The facilities name no metering point, so the number tells their statistics apart.
+    reading["statistic_name"] = f"{name} {label} ({zaehlpunkt})"
     reading["history_start"] = history_start.isoformat()
     reading["intervals"] = [
         {"start": entry["zeitpunkt"], "wh": entry["messwert"], "status": entry["status"]}

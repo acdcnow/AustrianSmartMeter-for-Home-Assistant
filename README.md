@@ -196,7 +196,8 @@ The integration adds a **load profile** sensor per metering point and register: 
 15-minute consumption and feed-in values in `Wh`, with the day's total for that register
 as an attribute next to the meter number and type from the API's device data. The sensor
 shows the newest quarter hour. The consumption and feed-in values also go into the
-long-term statistics `asm:<metering point>_consumption` and `…_production` with their
+long-term statistics `asm:<metering point>_consumption` and `…_production`, named
+*Smart Meter Consumption (<metering point>)* and *Smart Meter Production (…)*, with their
 real timestamps, for the Energy dashboard (see *Energy dashboard and long-term statistics*
 under E-Werk Gösting for how that import works).
 

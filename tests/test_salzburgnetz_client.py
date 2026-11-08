@@ -262,6 +262,14 @@ def test_history_start(history: str, reread_days: int, start: str) -> None:
     assert reading["statistic_id"] == f"asm:{OWN.lower()}_consumption"
 
 
+def test_statistics_are_named_after_the_metering_point() -> None:
+    """Metering points that share a name get statistics with names of their own."""
+    client = _client()
+    with patch.object(client, "_post", return_value=RECORDS[:1]):
+        (reading,) = client.historical_data(OWN)
+    assert reading["statistic_name"] == f"Smart Meter Consumption ({OWN})"
+
+
 def test_poll_is_cached_and_history_read_is_not() -> None:
     """A poll's period is read once per day; a history read every time (both load profiles, as one day has rows)."""
     client = _client()
