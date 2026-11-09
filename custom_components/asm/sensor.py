@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -97,8 +97,29 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Austria Smartmeter sensors."""
+    """Set up Austria Smartmeter sensors.
+
+    A later poll can bring readings that the first one lacked, for instance when
+    the first read was refused; their entities are added then.
+    """
     coordinator: AustriaSmartMeterCoordinator = entry.runtime_data
+    added: set[str | None] = set()
+
+    @callback
+    def _async_add_new_entities() -> None:
+        entities = [
+            entity for entity in _entities(coordinator) if entity.unique_id not in added
+        ]
+        added.update(entity.unique_id for entity in entities)
+        if entities:
+            async_add_entities(entities)
+
+    _async_add_new_entities()
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_new_entities))
+
+
+def _entities(coordinator: AustriaSmartMeterCoordinator) -> list[SensorEntity]:
+    """Return the entities of the coordinator's data."""
     entities: list[SensorEntity] = []
 
     # Iterate over all Zählpunkte found in the data
@@ -190,7 +211,7 @@ async def async_setup_entry(
                     coordinator, zp_num, stats[key], label, key
                 ))
 
-    async_add_entities(entities)
+    return entities
 
 
 def _get_clean_meter_name(info: dict[str, Any]) -> str:

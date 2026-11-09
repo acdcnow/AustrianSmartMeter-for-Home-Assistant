@@ -42,7 +42,7 @@ written to be tolerant instead of clever:
 * :func:`_record_timestamp` accepts a full ISO timestamp as well as the documented
   ``Datum`` + ``Uhrzeit`` + ``UTC`` triplet.
 * :func:`_harvest_metering_points` digs the 33-character metering points out of any
-  structure, so the discovery works even though ``/anlage`` is unknown.
+  structure, so the discovery still works if the ``/anlage`` answer changes.
 
 A shape that none of these recognise yields an empty result plus a warning rather
 than a wrong number, and the metering point numbers can always be entered by hand.
@@ -54,20 +54,37 @@ the **start** of the quarter hour: a day runs from 00:00:00 to 23:45:00, 96 valu
 ``BIS`` is inclusive, and an ``AB`` more than three years back is refused with
 HTTP 400 ("AB darf nicht länger als 3 Jahre zurückliegen.").
 
+Verified live (2026-11): ``/anlage`` answers ``{"PartnerNr": …, "Vertraege": […]}``
+with one row per contract and device of a metering point, ended contracts
+included (for instance those at an earlier address). A row carries ``Zählpunkt``,
+``Sparte`` ("Strom", "Gas"), ``Produkt``, ``Anlagenart`` ("Photovoltaik Anlage" or
+empty), ``Adresse_der_Anlage`` as one text, ``Vertragsbeginn`` and
+``Vertragsende`` as "YYYYMMDD" ("99991231" for no end), ``Anlage_ist_aktiv``
+("X" or empty) and ``Gerätenummer``. A metering point can have several rows: an
+earlier contract, or a second device.
+
 The consumption and feed-in registers therefore also carry their quarter hours as
 ``intervals``, with a ``statistic_id`` (``asm:<Zählpunkt>_consumption``): statistics.py
 imports them into Home Assistant's long-term statistics with their real timestamps,
 which is what the Energy dashboard uses - the entity itself only shows the most
 recent quarter hour of a load profile that is published once a day. The first
-import reads the history a month at a time from ``history_start`` on, one year back
-(IMPORT_YEARS; the API would accept three, but it limits the requests per 24
-hours). Those reads are not cached: each month is read once.
+import reads the history a month at a time from ``history_start`` on, as far back
+as the entry's history setting says (one year by default; the API would accept
+three, but it refuses requests when too many arrive). Those reads are not cached:
+each month is read once.
+
+Each poll reads the last few days again (the re-read setting), because the operator
+can deliver a day as placeholders first and its measured values later; the
+statistics import corrects the days of the poll.
 """
 from __future__ import annotations
 
 import logging
 import re
+import time
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone, tzinfo
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import requests
@@ -83,16 +100,33 @@ from .errors import (
 LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://api.salzburgnetz.at/api/v1"
-PROFILE_URL = f"{BASE_URL}/profile"
 ANLAGE_URL = f"{BASE_URL}/anlage"
 EQUIPMENT_URL = f"{BASE_URL}/equipment"
 
 REQUEST_TIMEOUT = 30
 
-# How long no request is sent after the API answered HTTP 429. Just under the
-# default poll interval of six hours: a pause of exactly six hours ends a fraction
-# of a second after the next poll, which then skips another six hours.
-THROTTLE_PAUSE = timedelta(hours=5, minutes=50)
+# How long a category is not requested after an HTTP 429 without a Retry-After
+# header. Verified live (2026-11-07): the limit is counted per category -
+# ``/equipment`` was refused while ``/profile_eg`` answered - and a refusal of
+# ``/equipment`` asked for a wait until midnight UTC, in a header spelled
+# "Retry--After".
+THROTTLE_PAUSE = timedelta(minutes=10)
+# The longest pause a Retry-After header can ask for.
+THROTTLE_PAUSE_MAX = timedelta(hours=24)
+# The longest pause a request waits out before it is sent, and how often one request
+# does. Verified live (2026-11-08): ``/profile_eg`` answered ten requests within a
+# minute, refused the eleventh and asked for a wait of 41 seconds. After about 25
+# requests for one metering point in a day it asked for a wait until midnight UTC,
+# as ``/equipment`` does; that pause is not waited out.
+THROTTLE_WAIT_MAX = timedelta(minutes=1)
+THROTTLE_WAIT_ATTEMPTS = 3
+# The response headers of an HTTP 429 that are logged: those about the limit.
+_LIMIT_HEADER_PARTS = ("retry", "limit")
+
+# The pauses after an HTTP 429: customer number -> what pauses (_pause_key) -> end
+# of the pause. They outlive the client, so a reload of the entry does not send the
+# refused requests again.
+_THROTTLED_UNTIL: dict[str, dict[str, datetime]] = {}
 
 # The API can answer in json, csv or xml; json is its own default and the only one
 # this adapter reads.
@@ -100,6 +134,33 @@ DATA_FORMAT = "json"
 
 # The documented example is a 15-minute load profile in kWh.
 INTERVAL_MINUTES = 15
+
+# The two load profile categories. While a metering point is a member of an energy
+# community (Energiegemeinschaft), ``profile_eg`` holds its own measured total ("G.01"
+# without a community) next to the community's rows, and ``profile`` only what is
+# left after the community's share ("P.01", "Restverbrauch/-einspeisung"). Outside a
+# membership, ``profile_eg`` has no rows and ``profile`` holds the measured total.
+# Verified live (2026-11-09) on a metering point that joined a community: before that
+# day ``profile``'s "P.01" matched the grid meter, from that day on "G.01" did.
+PROFILE_URLS = {name: f"{BASE_URL}/{name}" for name in ("profile", "profile_eg")}
+
+# How many days before today a poll reads as well. The operator can deliver a day
+# as placeholders first (zeros marked "Ersatzwert nicht belastbar" or "Wert ist
+# nicht vorhanden") and its measured values a day or more later; the statistics
+# import corrects the days a poll reads. At least two: a day is published on the
+# day after, and the first poll of that day can run before the publication, so
+# with one day it would never be read again.
+DEFAULT_REREAD_DAYS = 3
+MIN_REREAD_DAYS = 2
+MAX_REREAD_DAYS = 14
+
+# How far back the first statistics import of a metering point reads.
+HISTORY_NONE = "none"
+HISTORY_MONTH = "month"
+HISTORY_YEAR = "year"
+HISTORY_MAXIMUM = "maximum"
+HISTORY_CHOICES = (HISTORY_NONE, HISTORY_MONTH, HISTORY_YEAR, HISTORY_MAXIMUM)
+DEFAULT_HISTORY = HISTORY_YEAR
 
 # How the metering point should be described in Home Assistant.
 DEVICE_MODEL = "Salzburg Netz load profile (15 min)"
@@ -140,12 +201,28 @@ _CITY_FIELDS = ("ort", "stadt", "city", "gemeinde", "ortschaft")
 _ADDRESS_CONTAINERS = ("verbrauchsstelle", "adresse", "address", "anschrift",
                        "standort", "anlagenadresse", "liegenschaft")
 
+# The contract rows of an /anlage answer: contract key -> field names.
+_CONTRACT_FIELDS = (
+    ("sparte", ("sparte",)),
+    ("anlagenart", ("anlagenart",)),
+    ("produkt", ("produkt",)),
+    ("adresse", ("adresseDerAnlage",)),
+    ("geraet", ("geraetenummer",)),
+)
+_CONTRACT_START_FIELDS = ("vertragsbeginn",)
+_CONTRACT_END_FIELDS = ("vertragsende",)
+_ACTIVE_FIELD = "anlageistaktiv"
+# What a metering point's description takes from one contract row.
+_DESCRIPTIVE_KEYS = ("zaehlpunktName", "zaehlpunktAnlagentyp", "verbrauchsstelle")
+
 _METER_NUMBER_FIELDS = ("zaehlernummer", "zaehlernr", "geraetenummer", "geraetenr",
                         "meternumber", "serialnumber", "serial", "equipmentNumber",
                         "deviceId", "nummer")
-_METER_TYPE_FIELDS = ("zaehlertyp", "geraetetyp", "meteringType", "typtext", "typ",
-                      "bauart", "modell", "model")
+_METER_TYPE_FIELDS = ("smartTyp", "zaehlertyp", "geraetetyp", "meteringType",
+                      "typtext", "typ", "bauart", "modell", "model")
 _MANUFACTURER_FIELDS = ("hersteller", "manufacturer", "marke", "brand")
+_DEVICE_KIND_FIELDS = ("geraeteart",)
+_SMART_FIELDS = ("istSmart", "smarterZaehler")
 _EXTRA_EQUIPMENT_FIELDS = (("eichjahr", "eichjahr"), ("baujahr", "baujahr"),
                            ("zulassungsnummer", "zulassungsnummer"),
                            ("zaehlpunktAnlagentyp", "zaehlpunktAnlagentyp"))
@@ -172,14 +249,18 @@ _STATISTIC_REGISTERS = {
 # read that begins on that day is not refused while the day changes.
 HISTORY_YEARS = 3
 
-# How far back the first statistics import reads: one year, 13 monthly reads. The
-# API would hand out three, but it limits the requests per 24 hours, and 37 reads
-# on top of the daily polls reach that limit.
+# How far back the first statistics import reads by default (HISTORY_YEAR): one
+# year, 13 monthly reads. The API would hand out three (HISTORY_MAXIMUM), but it
+# refuses requests when too many arrive.
 IMPORT_YEARS = 1
 
-# The suffix an Austrian load profile uses to name the direction: "P" for Bezug,
-# "G" for Einspeisung. It does not change which register is meant.
+# The suffix after the register ("1-1:1.9.0 G.01"). In ``profile_eg``, "G.01" with
+# no energy community named is the metering point's measured total; the other
+# suffixes and the rows of a community are its shares (seen 2026-11). It does not
+# change which register is meant.
 _OBIS_SUFFIX = re.compile(r"[\s_-]*[A-Z]\.\d+$")
+_OWN_TOTAL_SUFFIX = " G.01"
+_COMMUNITY_FIELDS = ("idDerEnergiegemeinschaft", "nameDerEnergiegemeinschaft")
 
 
 def _normalise(value: Any) -> str:
@@ -546,7 +627,25 @@ def _is_facility(value: str) -> bool:
     return bool(_FACILITY.match(value))
 
 
-def _normalise_metering_points(value: Any) -> list[str]:
+def limit_reread_days(value: Any) -> int:
+    """Return the configured re-read window in days, within its limits."""
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_REREAD_DAYS
+    return min(max(days, MIN_REREAD_DAYS), MAX_REREAD_DAYS)
+
+
+def invalid_metering_points(value: Any) -> list[str]:
+    """Return the entered values that are neither a metering point nor a facility."""
+    return [
+        item
+        for item in normalise_metering_points(value)
+        if not _is_metering_point(item) and not _is_facility(item)
+    ]
+
+
+def normalise_metering_points(value: Any) -> list[str]:
     """Return the metering points a user entered, cleaned and deduplicated."""
     if value is None:
         return []
@@ -616,10 +715,12 @@ def _metering_point_id(record: dict[str, Any]) -> str:
 def _harvest_metering_points(payload: Any, depth: int = 0) -> dict[str, dict[str, Any]]:
     """Collect the metering points of an ``/anlage`` answer.
 
-    The response of that category is not documented, so instead of assuming a
-    structure this walks whatever came back and picks up every object that names a
-    metering point or a facility number. The first, usually most detailed,
-    occurrence of an identifier wins.
+    This walks whatever came back and picks up every object that names a metering
+    point or a facility number, so a changed structure still yields them. The
+    name, type and address of an identifier come from its first occurrence with a
+    current contract, else from its first one; the contract rows of all
+    occurrences are collected in ``vertraege``, and ``aktiv`` tells whether one of
+    them is current, where the rows say so.
     """
     found: dict[str, dict[str, Any]] = {}
     if depth > 8 or payload is None:
@@ -639,8 +740,39 @@ def _harvest_metering_points(payload: Any, depth: int = 0) -> dict[str, dict[str
         if not isinstance(value, (dict, list)):
             continue
         for identifier, info in _harvest_metering_points(value, depth + 1).items():
-            found.setdefault(identifier, info)
+            known = found.setdefault(identifier, {})
+            if _contract_rank(info) < _contract_rank(known):
+                for key in _DESCRIPTIVE_KEYS:
+                    known.pop(key, None)
+            contracts = known.get("vertraege", []) + info.get("vertraege", [])
+            for key, item in info.items():
+                known.setdefault(key, item)
+            if contracts:
+                known["vertraege"] = contracts
+
+    if depth == 0:
+        for info in found.values():
+            states = [
+                contract["aktiv"]
+                for contract in info.get("vertraege", [])
+                if "aktiv" in contract
+            ]
+            if states:
+                info["aktiv"] = any(states)
     return found
+
+
+def _contract_rank(info: Mapping[str, Any]) -> int:
+    """Return how well the contracts of an occurrence describe its metering point.
+
+    0 with a current contract, 1 without any contract state, 2 with ended ones only.
+    """
+    states = [
+        contract["aktiv"] for contract in info.get("vertraege", []) if "aktiv" in contract
+    ]
+    if not states:
+        return 1
+    return 0 if any(states) else 2
 
 
 def _metering_point_info(record: dict[str, Any], identifier: str) -> dict[str, Any]:
@@ -658,13 +790,106 @@ def _metering_point_info(record: dict[str, Any], identifier: str) -> dict[str, A
     address = _address_from(record)
     if address:
         info["verbrauchsstelle"] = address
+
+    contract = _contract(record)
+    if contract:
+        info["vertraege"] = [contract]
     return info
 
 
+def _contract_day(value: Any) -> str | None:
+    """Return a contract date as an ISO date; None for none and for the open end."""
+    parsed = _parse_date(_scalar(value))
+    if parsed is None or parsed.year == 9999:
+        return None
+    return parsed.date().isoformat()
+
+
+def _contract(record: dict[str, Any]) -> dict[str, Any]:
+    """Return what a contract row of an ``/anlage`` answer says, or nothing.
+
+    ``aktiv`` comes from the row's active flag, or without one from the end of
+    the contract; ``ende`` is left out for a contract without an end.
+    """
+    contract: dict[str, Any] = {}
+    for key, names in _CONTRACT_FIELDS:
+        value = _scalar(_lookup(record, names))
+        if value:
+            contract[key] = value
+    for key, names in (("beginn", _CONTRACT_START_FIELDS), ("ende", _CONTRACT_END_FIELDS)):
+        day = _contract_day(_lookup(record, names))
+        if day:
+            contract[key] = day
+
+    flags = [value for key, value in record.items() if _normalise(key) == _ACTIVE_FIELD]
+    if flags:
+        contract["aktiv"] = _scalar(flags[0]).upper() == "X"
+    elif _lookup(record, _CONTRACT_START_FIELDS + _CONTRACT_END_FIELDS) is not None:
+        contract["aktiv"] = contract.get("ende", "9999-12-31") >= _today().isoformat()
+    return contract
+
+
+def _pause_key(url: str, body: Mapping[str, Any]) -> str:
+    """Return what a pause after an HTTP 429 applies to.
+
+    Verified live (2026-11-08): the daily limit of a load profile is counted per
+    metering point - one metering point's ``/profile_eg`` was refused while those
+    of the others were answered - and that of ``/equipment`` per customer number.
+    So a load profile pauses for its metering point, any other category as a whole.
+    """
+    if url in PROFILE_URLS.values():
+        return f"{url} {body.get('ZP') or ''}".rstrip()
+    return url
+
+
+def _throttle_pause(headers: Mapping[str, str], now: datetime) -> timedelta:
+    """Return how long to pause after an HTTP 429: as Retry-After asks, if it does.
+
+    The header is found whatever its hyphens, because the API spells it
+    "Retry--After".
+    """
+    value = next(
+        (str(value).strip() for name, value in headers.items()
+         if _normalise(name) == "retryafter"),
+        "",
+    )
+    pause: timedelta | None = None
+    if value.isdigit():
+        pause = timedelta(seconds=int(value))
+    elif value:
+        try:
+            moment = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            moment = None
+        if moment is not None and moment.tzinfo is not None:
+            pause = moment - now
+    if pause is None:
+        return THROTTLE_PAUSE
+    return min(max(pause, timedelta(seconds=1)), THROTTLE_PAUSE_MAX)
+
+
+def _meter_record(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return the record of the meter among a metering point's devices.
+
+    Verified live (2026-11): a metering point can have a tariff clock next to its
+    meter ("Geräteart" "TRE/Uhr" and "Zähler"). The smart device is taken, else
+    the meter, else the first device.
+    """
+
+    def rank(record: dict[str, Any]) -> tuple[bool, bool]:
+        smart = any(
+            _scalar(_lookup(record, (name,))).upper() == "X" for name in _SMART_FIELDS
+        )
+        meter = _normalise(_lookup(record, _DEVICE_KIND_FIELDS)) == "zaehler"
+        return not smart, not meter
+
+    return min(records, key=rank)
+
+
 def _equipment_info(payload: Any) -> dict[str, Any]:
-    """Return the device details of an ``/equipment`` answer, read tolerantly."""
+    """Return the meter's details of an ``/equipment`` answer, read tolerantly."""
     records = _records(payload)
-    record: dict[str, Any] | None = records[0] if records else None
+    record: dict[str, Any] | None = _meter_record(records) if records else None
     if record is None and isinstance(payload, dict):
         # A single device may well come back as a flat object rather than a list.
         record = payload
@@ -711,14 +936,39 @@ def _history_start(today: date, years: int = HISTORY_YEARS) -> date:
     return floor + timedelta(days=1)
 
 
+def _month_before(day: date) -> date:
+    """Return the same day a month earlier, or the last day of a shorter month."""
+    last_of_previous = day.replace(day=1) - timedelta(days=1)
+    return last_of_previous.replace(day=min(day.day, last_of_previous.day))
+
+
+def _import_start(today: date, history: str, reread_days: int) -> date:
+    """Return the first day the first statistics import of a metering point reads.
+
+    The days a poll reads are imported even without any history: they are the
+    ones later polls correct.
+    """
+    window = today - timedelta(days=reread_days)
+    if history == HISTORY_NONE:
+        return window
+    if history == HISTORY_MONTH:
+        start = _month_before(today)
+    elif history == HISTORY_MAXIMUM:
+        start = _history_start(today, HISTORY_YEARS)
+    else:
+        start = _history_start(today, IMPORT_YEARS)
+    return min(start, window)
+
+
 def _add_statistics(
-    reading: dict[str, Any], zaehlpunkt: str, name: str
+    reading: dict[str, Any], zaehlpunkt: str, name: str, history_start: date
 ) -> None:
     """Add the fields statistics.py imports to a consumption or feed-in reading.
 
     Its ``intervals`` are its quarter hours with their real start; statistics.py
     sums them per hour and only takes complete hours, so a day that is still
-    being published is held back until it is complete.
+    being published is held back until it is complete. ``history_start`` is the
+    first day of the first import, and no hour before it is corrected later.
     """
     register = _STATISTIC_REGISTERS.get(reading["obisCode"])
     if register is None:
@@ -726,17 +976,58 @@ def _add_statistics(
     suffix, label = register
     reading["statistic_id"] = _statistic_id(zaehlpunkt, suffix)
     reading["statistic_name"] = f"{name} {label}"
-    reading["history_start"] = _history_start(_today(), IMPORT_YEARS).isoformat()
+    reading["history_start"] = history_start.isoformat()
     reading["intervals"] = [
         {"start": entry["zeitpunkt"], "wh": entry["messwert"], "status": entry["status"]}
         for entry in reading["messwerte"]
     ]
 
 
+def _is_own_total(record: dict[str, Any]) -> bool:
+    """Return True for a ``profile_eg`` record of the metering point's measured total."""
+    obis = _scalar(_lookup(record, _OBIS_FIELDS)).upper()
+    return obis.endswith(_OWN_TOTAL_SUFFIX) and not any(
+        _scalar(_lookup(record, (field,))) for field in _COMMUNITY_FIELDS
+    )
+
+
+def _measured(
+    community: list[dict[str, Any]], standard: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return the records of the measured total from both load profiles.
+
+    The quarter hours ``profile_eg`` has rows for take its own total, the others
+    ``profile``'s.
+    """
+    covered = {_record_timestamp(record) for record in community}
+    return [record for record in community if _is_own_total(record)] + [
+        record for record in standard if _record_timestamp(record) not in covered
+    ]
+
+
+def _lacks_days(records: list[dict[str, Any]], ab: str, bis: str) -> bool:
+    """Return True when ``records`` have no row for a day of ``ab`` to ``bis``.
+
+    Only the days up to yesterday count: a day is published on the day after.
+    """
+    days = {
+        stamp.astimezone(_vienna()).date()
+        for record in records
+        if (stamp := _record_timestamp(record)) is not None
+    }
+    first = date.fromisoformat(ab)
+    last = min(date.fromisoformat(bis), _today() - timedelta(days=1))
+    return any(
+        first + timedelta(days=offset) not in days
+        for offset in range((last - first).days + 1)
+    )
+
+
 def _readings_from_profile(
     records: list[dict[str, Any]],
     zaehlpunkt: str | None = None,
     name: str | None = None,
+    history_start: date | None = None,
 ) -> list[dict[str, Any]]:
     """Turn load profile records into the integration's reading contract.
 
@@ -744,7 +1035,11 @@ def _readings_from_profile(
     of the requested period, oldest first - the sensor platform reports the most
     recent one and charts the rest. With the metering point given, the energy
     registers also carry what the long-term statistics import needs.
+    ``history_start`` is the first day of a first import; without it, the default
+    settings decide.
     """
+    if history_start is None:
+        history_start = _import_start(_today(), DEFAULT_HISTORY, DEFAULT_REREAD_DAYS)
     readings: dict[str, dict[str, Any]] = {}
     day_totals: dict[tuple[str, date], float] = {}
 
@@ -796,8 +1091,12 @@ def _readings_from_profile(
         reading["messwerte"] = [entry for entry, _ in values]
         reading["records_read"] = len(values)
         if zaehlpunkt:
-            _add_statistics(reading, zaehlpunkt, name or zaehlpunkt)
+            _add_statistics(reading, zaehlpunkt, name or zaehlpunkt, history_start)
     return [readings[obis] for obis in sorted(readings)]
+
+
+class _TooManyRequests(SmartmeterConnectionError):
+    """The API refused a request with HTTP 429."""
 
 
 class SalzburgNetzClient(SmartmeterClient):
@@ -809,13 +1108,18 @@ class SalzburgNetzClient(SmartmeterClient):
         gpnr: str | None,
         metering_points: Any = None,
         password: str | None = None,
+        *,
+        reread_days: Any = None,
+        history: str | None = None,
     ):
         # The API key is the credential, so it goes into the username slot of the
         # base class and never into the password one.
         super().__init__(token, None)
         self.token = (token or "").strip()
         self.gpnr = (gpnr or "").strip()
-        self.metering_points = _normalise_metering_points(metering_points)
+        self.metering_points = normalise_metering_points(metering_points)
+        self.reread_days = limit_reread_days(reread_days)
+        self.history = history if history in HISTORY_CHOICES else DEFAULT_HISTORY
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -834,19 +1138,30 @@ class SalzburgNetzClient(SmartmeterClient):
         # is published once a day and the operator asks for at most one query per
         # period per day.
         self._validated_on: date | None = None
+        # After a failed listing of the facilities with entered metering points,
+        # the moment it is tried again; until then those are read.
+        self._listing_retry_at: datetime | None = None
         self._found: dict[str, dict[str, Any]] = {}
-        self._device_details: dict[str, dict[str, Any]] = {}
-        self._device_details_day: date | None = None
+        self._device_details: dict[str, tuple[date, dict[str, Any]]] = {}
         self._profiles: dict[tuple[str, str, str], tuple[date, list[dict[str, Any]]]] = {}
-        # After an HTTP 429 (the API's limit per 24 hours) no request is sent until
-        # this moment: every poll and every statistics import would hit it again.
-        self._throttled_until: datetime | None = None
+        # After an HTTP 429 the category (its URL) is not requested until this
+        # moment: every poll and every statistics import would hit it again.
+        self._throttled_until = _THROTTLED_UNTIL.setdefault(self.gpnr, {})
 
     # -------------------------------------------------------------- session
 
     def is_logged_in(self) -> bool:
-        """Return True once the key has been accepted on this day."""
-        return self._validated_on == _today()
+        """Return True once the key has been accepted on this day.
+
+        After a failed listing of the facilities, the entered metering points are
+        read without one until the listing is tried again.
+        """
+        if self._validated_on == _today():
+            return True
+        return (
+            self._listing_retry_at is not None
+            and datetime.now(timezone.utc) < self._listing_retry_at
+        )
 
     def is_login_expired(self) -> bool:
         """Return True while the key has not been checked today.
@@ -869,12 +1184,13 @@ class SalzburgNetzClient(SmartmeterClient):
         the customer number, and it is what the metering point discovery needs
         anyway. Without configured metering points a failure here is fatal; with
         them it is only a warning, because the numbers the user entered are used
-        instead.
+        instead, with what the last listing said about them. The listing is then
+        tried again after a pause, or once the API's own pause after an HTTP 429
+        has ended.
         """
         if not self.gpnr:
             raise SmartmeterQueryError("No customer number (GPNR) configured.")
 
-        payload: Any = None
         try:
             payload = self._post(ANLAGE_URL, self._body())
         except SmartmeterLoginError:
@@ -882,21 +1198,27 @@ class SalzburgNetzClient(SmartmeterClient):
         except SmartmeterError as err:
             if not self.metering_points:
                 raise
+            now = datetime.now(timezone.utc)
+            self._listing_retry_at = max(
+                now + THROTTLE_PAUSE, self._throttled_until.get(ANLAGE_URL, now)
+            )
             LOGGER.warning(
                 "Salzburg Netz: could not list the metering points of %s (%s); "
-                "using the configured ones",
+                "using the configured ones until %s",
                 self.gpnr,
                 err,
+                f"{self._listing_retry_at.astimezone(_vienna()):%Y-%m-%d %H:%M:%S}",
             )
+            return self
 
         self._found = _harvest_metering_points(payload)
         self._validated_on = _today()
-        if payload is not None:
-            LOGGER.debug(
-                "Salzburg Netz: %s metering point(s) found for %s",
-                len(self._found),
-                self.gpnr,
-            )
+        self._listing_retry_at = None
+        LOGGER.debug(
+            "Salzburg Netz: %s metering point(s) found for %s",
+            len(self._found),
+            self.gpnr,
+        )
         return self
 
     # ----------------------------------------------------------------- http
@@ -919,14 +1241,42 @@ class SalzburgNetzClient(SmartmeterClient):
         return body
 
     def _post(self, url: str, body: dict[str, Any]) -> Any:
-        """POST a request body and return the parsed response."""
-        now = datetime.now(timezone.utc)
-        if self._throttled_until is not None and now < self._throttled_until:
-            raise SmartmeterConnectionError(
-                f"{url} not requested: the API's request limit per 24 hours was "
-                f"reached, the next request goes out after "
-                f"{self._throttled_until.astimezone(_vienna()):%Y-%m-%d %H:%M}"
-            )
+        """POST a request body and return the parsed response.
+
+        A pause after an HTTP 429 that ends within THROTTLE_WAIT_MAX is waited out,
+        at most THROTTLE_WAIT_ATTEMPTS times per request; during a longer one the
+        request is not sent.
+        """
+        key = _pause_key(url, body)
+        waits = 0
+        while True:
+            throttled_until = self._throttled_until.get(key)
+            now = datetime.now(timezone.utc)
+            if throttled_until is not None and now < throttled_until:
+                if throttled_until - now > THROTTLE_WAIT_MAX:
+                    raise SmartmeterConnectionError(
+                        f"{key} not requested: the API refused it with HTTP 429, "
+                        f"the next request goes out after "
+                        f"{throttled_until.astimezone(_vienna()):%Y-%m-%d %H:%M:%S}"
+                    )
+                waits += 1
+                # One second more, so that the API's window has surely passed.
+                time.sleep((throttled_until - now).total_seconds() + 1)
+                now = datetime.now(timezone.utc)
+            try:
+                return self._post_once(url, body, now, key)
+            except _TooManyRequests:
+                pause = self._throttled_until[key] - datetime.now(timezone.utc)
+                if pause > THROTTLE_WAIT_MAX or waits == THROTTLE_WAIT_ATTEMPTS:
+                    raise
+
+    def _post_once(
+        self, url: str, body: dict[str, Any], now: datetime, key: str
+    ) -> Any:
+        """POST a request body once and return the parsed response.
+
+        An HTTP 429 pauses ``key`` (_pause_key).
+        """
         try:
             response = self.session.request(
                 "POST", url, json=body, timeout=REQUEST_TIMEOUT
@@ -972,56 +1322,88 @@ class SalzburgNetzClient(SmartmeterClient):
             )
         if response.status_code == 429:
             # Verified live: "Maximale Anzahl an Abfragen je 24 Stunden
-            # überschritten." The window is rolling, so the pause is a fraction of it.
-            self._throttled_until = now + THROTTLE_PAUSE
-            raise SmartmeterConnectionError(
-                f"{text} (too many requests, retry later)"
+            # überschritten."
+            pause = _throttle_pause(response.headers, now)
+            self._throttled_until[key] = now + pause
+            limit_headers = {
+                name: value
+                for name, value in response.headers.items()
+                if any(part in name.lower() for part in _LIMIT_HEADER_PARTS)
+            }
+            log = LOGGER.debug if pause <= THROTTLE_WAIT_MAX else LOGGER.warning
+            log(
+                "Salzburg Netz refused %s with HTTP 429 (%s, headers %s); it is not "
+                "requested before %s",
+                key,
+                detail or "no detail",
+                limit_headers or "without limit headers",
+                f"{self._throttled_until[key].astimezone(_vienna()):%Y-%m-%d %H:%M:%S}",
             )
+            raise _TooManyRequests(f"{text} (too many requests, retry later)")
         if response.status_code in (400, 404, 422):
             raise SmartmeterQueryError(text)
         raise SmartmeterConnectionError(text)
 
     # ------------------------------------------------------- metering points
 
-    def _metering_point_ids(self) -> list[str]:
-        """Return the metering points to read: the configured ones, then found."""
-        identifiers = list(self.metering_points)
-        for identifier in self._found:
-            if identifier not in identifiers:
-                identifiers.append(identifier)
-        return identifiers
+    def metering_points_to_read(self) -> list[str]:
+        """Return the metering points to read.
+
+        Entered metering points are the only ones read: the facilities of a
+        customer number also list those of ended contracts, for instance at an
+        earlier address. Without any entered, the found ones are read, except
+        those whose contracts have all ended.
+        """
+        if self.metering_points:
+            return list(self.metering_points)
+        return [
+            identifier
+            for identifier, info in self._found.items()
+            if info.get("aktiv") is not False
+        ]
+
+    def describe_metering_points(self) -> dict[str, dict[str, Any]]:
+        """Return the found and the entered metering points with what the API says.
+
+        That is what the facilities said at the last login, so no request is sent.
+        """
+        identifiers = list(self._found)
+        identifiers += [item for item in self.metering_points if item not in identifiers]
+        return {
+            identifier: dict(self._found.get(identifier) or {})
+            for identifier in identifiers
+        }
 
     def _device_details_for(self, identifier: str) -> dict[str, Any]:
         """Return the device details of a metering point, cached for the day.
 
         The details are a bonus: a metering point stays usable when the category
-        is not available for it.
+        is not available for it. A read that is refused or not answered is tried
+        again with the next poll, and until then the last details stay.
         """
-        if self._device_details_day != _today():
-            self._device_details = {}
-            self._device_details_day = _today()
-        if identifier not in self._device_details:
-            details: dict[str, Any] = {}
-            try:
-                details = _equipment_info(
-                    self._post(EQUIPMENT_URL, self._body(identifier))
-                )
-            except SmartmeterError as err:
-                LOGGER.debug(
-                    "Salzburg Netz: no device details for %s: %s", identifier, err
-                )
-            self._device_details[identifier] = details
-        return self._device_details[identifier]
+        cached = self._device_details.get(identifier)
+        if cached is not None and cached[0] == _today():
+            return cached[1]
+        try:
+            details = _equipment_info(self._post(EQUIPMENT_URL, self._body(identifier)))
+        except SmartmeterConnectionError as err:
+            LOGGER.debug("Salzburg Netz: no device details for %s yet: %s", identifier, err)
+            return cached[1] if cached is not None else {}
+        except SmartmeterError as err:
+            LOGGER.debug("Salzburg Netz: no device details for %s: %s", identifier, err)
+            details = {}
+        self._device_details[identifier] = (_today(), details)
+        return details
 
     def zaehlpunkte(self) -> list[dict[str, Any]]:
         """Return the metering points of the customer number."""
         self._ensure_session()
-        identifiers = self._metering_point_ids()
+        identifiers = self.metering_points_to_read()
         if not identifiers:
             raise SmartmeterQueryError(
-                "No metering points could be determined. The API does not "
-                "document how a customer number lists its facilities; enter the "
-                "33-character metering point numbers when adding the integration."
+                "No metering points could be determined: the facilities of the "
+                "customer number list no current one. Enter the 33-character "
+                "metering point numbers in the integration's options."
             )
 
         metering_points: list[dict[str, Any]] = []
@@ -1043,19 +1425,28 @@ class SalzburgNetzClient(SmartmeterClient):
     def _profile_records(
         self, identifier: str, ab: str, bis: str, cache: bool = True
     ) -> list[dict[str, Any]]:
-        """Return the load profile records of a period, cached for the day.
+        """Return the records of the measured total of a period, cached for the day.
 
-        A history read (``cache`` False) is neither cached - the first statistics
-        import reads its history a month at a time, and each month only once
-        - nor warned about when empty: a month before the meter delivered values
-        has none.
+        ``profile_eg`` is read first; ``profile`` only when ``profile_eg`` has no rows
+        for a day of the period that is over, and then the quarter hours without a
+        ``profile_eg`` row take its values (_measured). A history read (``cache``
+        False) is neither cached - the first statistics import reads its history a
+        month at a time, and each month only once - nor warned about when empty: a
+        month before the meter delivered values has none.
         """
         cache_key = (identifier, ab, bis)
         cached = self._profiles.get(cache_key)
         if cached is not None and cached[0] == _today():
             return cached[1]
 
-        records = _records(self._post(PROFILE_URL, self._body(identifier, ab, bis)))
+        body = self._body(identifier, ab, bis)
+        community = _records(self._post(PROFILE_URLS["profile_eg"], body))
+        standard = (
+            _records(self._post(PROFILE_URLS["profile"], body))
+            if _lacks_days(community, ab, bis)
+            else []
+        )
+        records = _measured(community, standard)
         if not cache:
             if not records:
                 LOGGER.debug(
@@ -1081,9 +1472,10 @@ class SalzburgNetzClient(SmartmeterClient):
     ) -> list[dict[str, Any]]:
         """Return the 15-minute load profile of one metering point.
 
-        The default period is yesterday up to today: yesterday is complete (the
-        operator publishes a day between 10:00 and 12:00), today is still filling
-        up, and the most recent value is the one the sensors show.
+        The default period is the last ``reread_days`` days up to today: the
+        operator publishes a day between 10:00 and 12:00 and can replace its
+        values later, today is still filling up, and the most recent value is the
+        one the sensors show.
 
         The period is read at most once per day, as the operator asks. An explicit
         period is a history read of the statistics import (statistics.py): it is not
@@ -1094,11 +1486,12 @@ class SalzburgNetzClient(SmartmeterClient):
         if not identifier:
             raise SmartmeterQueryError("No metering point given.")
 
+        today = _today()
         history = date_from is not None or date_until is not None
         if history and isinstance(date_from, date):
-            date_from = max(date_from, _history_start(_today()))
-        ab = _iso_date(date_from) or _iso_date(_today() - timedelta(days=1))
-        bis = _iso_date(date_until) or _iso_date(_today())
+            date_from = max(date_from, _history_start(today))
+        ab = _iso_date(date_from) or _iso_date(today - timedelta(days=self.reread_days))
+        bis = _iso_date(date_until) or _iso_date(today)
         if ab and bis and ab > bis:
             ab, bis = bis, ab
 
@@ -1106,7 +1499,10 @@ class SalzburgNetzClient(SmartmeterClient):
             identifier, ab or "", bis or "", cache=not history
         )
         name = (self._found.get(identifier) or {}).get("zaehlpunktName") or "Smart Meter"
-        return _readings_from_profile(records, identifier, name)
+        return _readings_from_profile(
+            records, identifier, name,
+            _import_start(today, self.history, self.reread_days),
+        )
 
     def consumptions(self) -> list[dict[str, Any]]:
         """A load profile has no ready made statistics.

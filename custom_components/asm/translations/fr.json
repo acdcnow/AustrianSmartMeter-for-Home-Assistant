@@ -21,14 +21,30 @@
           "country_code": "Code pays (p. ex. at)",
           "postcode": "Code postal",
           "gpnr": "Numéro client (GPNR, 8 chiffres)",
-          "metering_points": "Points de comptage (ZP), facultatif - séparés par des virgules",
           "username": "Nom d'utilisateur (E-mail)",
           "password": "Mot de passe"
+        },
+        "data_description": {
+          "gpnr": "Le numéro client pour lequel la clé API a été créée, tel qu'affiché dans le portail de service."
         }
       },
       "qualification": {
         "title": "Selectra : déterminer le tarif",
         "description": "Selectra identifie le tarif via un questionnaire, et chaque réponse coûte un appel du quota mensuel. Les questions de type `json` attendent un document JSON.\n\n{question_list}"
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz : paramètres",
+        "description": "Cochez les points de comptage à lire. Chacun indique ce que Salzburg Netz en dit, dans ses propres termes et si c'est connu : l'énergie (Strom, Gas), le type d'installation, le produit et l'adresse, et entre parenthèses les numéros de compteur. Un point de comptage dont tous les contrats sont terminés, par exemple à une adresse précédente, figure à la fin avec la période du contrat et n'est pas coché.\n\nLes paramètres ci-dessous déterminent ce qui est lu et ce que la première importation écrit dans les statistiques à long terme, utilisées par le tableau de bord Énergie. Tout peut être modifié plus tard dans les options de l'intégration.",
+        "data": {
+          "metering_points": "Points de comptage",
+          "reread_days": "Jours relus à chaque mise à jour",
+          "history": "Historique de la première importation"
+        },
+        "data_description": {
+          "metering_points": "Seuls les points de comptage cochés sont lus. Un point que Salzburg Netz ajoute plus tard à votre numéro client est lu dès que vous le cochez dans les options. Si Salzburg Netz n'en indique aucun ou ne répond pas, saisissez-les à la main, séparés par des virgules : points de comptage de 33 caractères (AT…) ou numéros d'installation à 10 chiffres (003…).",
+          "reread_days": "Chaque mise à jour lit la courbe de charge depuis autant de jours en arrière jusqu'à aujourd'hui, avec une requête par point de comptage et par jour, deux pour un point de comptage hors d'une communauté énergétique. Salzburg Netz livre parfois un jour d'abord sous forme de valeurs provisoires (0, marquées comme valeurs de remplacement) et les valeurs mesurées un jour ou plus tard ; les jours compris dans cette période sont alors corrigés dans les statistiques. Plus de jours rendent les réponses plus volumineuses, pas les requêtes plus fréquentes. La première importation couvre au moins ces jours, même sans historique. Au moins 2 jours : un jour est publié le lendemain, et la première mise à jour de ce jour-là peut avoir lieu avant la publication.",
+          "history": "Jusqu'où remonte la première importation d'un point de comptage. Elle lit un mois par requête et par point de comptage, deux pour une période hors d'une communauté énergétique : un an demande jusqu'à 26 requêtes par point de comptage, trois ans jusqu'à 74, en plus des mises à jour. L'API refuse des requêtes quand il en arrive trop ; une lecture refusée est retentée lors d'une mise à jour ultérieure. Utilisé seulement tant qu'un point de comptage n'a pas encore de statistiques, c'est-à-dire à la configuration ou pour un point de comptage ajouté plus tard ; le modifier n'importe rien pour les autres."
+        }
       }
     },
     "error": {
@@ -36,7 +52,11 @@
       "invalid_auth": "Authentification échouée. Veuillez vérifier vos identifiants.",
       "invalid_input": "La valeur est invalide.",
       "no_contracts": "Aucun point de comptage trouvé dans ce compte.",
-      "unknown": "Erreur inattendue."
+      "unknown": "Erreur inattendue.",
+      "invalid_metering_points": "Saisissez des points de comptage de 33 caractères (AT…) ou des numéros d'installation à 10 chiffres (003…), séparés par des virgules.",
+      "no_metering_points": "Choisissez au moins un point de comptage.",
+      "metering_points_not_listed": "Salzburg Netz n'a pas répondu à la demande de vos points de comptage (le journal en indique la raison) ; la clé API n'est donc pas encore vérifiée. Saisissez les points de comptage à la main, ou fermez cette boîte de dialogue et réessayez plus tard.",
+      "customer_number_refused": "Salzburg Netz a refusé la demande pour ce numéro client (le journal en indique la raison). Vérifiez le numéro client et que la clé API a bien été créée pour lui."
     },
     "abort": {
       "already_configured": "Ce compte est déjà configuré."
@@ -48,7 +68,40 @@
         "title": "Options",
         "data": {
           "scan_interval": "Intervalle de mise à jour (minutes)"
+        },
+        "data_description": {
+          "scan_interval": "Le temps entre deux mises à jour, en minutes (au moins 60)."
         }
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz : options",
+        "description": "Chaque point de comptage indique ce que Salzburg Netz en a dit lors de la dernière connexion, si c'est connu : l'énergie (Strom, Gas), le type d'installation, le produit et l'adresse, et entre parenthèses les numéros de compteur. Un point dont tous les contrats sont terminés figure à la fin, avec la période du contrat.\n\nL'enregistrement recharge l'intégration, qui relit alors chaque point de comptage coché une fois de plus.",
+        "data": {
+          "metering_points": "Points de comptage",
+          "reread_days": "Jours relus à chaque mise à jour",
+          "history": "Historique de la première importation",
+          "scan_interval": "Intervalle de mise à jour (minutes)"
+        },
+        "data_description": {
+          "metering_points": "Seuls les points de comptage cochés sont lus. Un point coché est importé selon l'historique choisi ; un point décoché n'est plus lu, ses statistiques restent, et son appareil peut ensuite être supprimé sur la page de l'appareil. Si l'intégration n'est pas chargée, saisissez-les à la main, séparés par des virgules : points de comptage de 33 caractères (AT…) ou numéros d'installation à 10 chiffres (003…).",
+          "reread_days": "Chaque mise à jour lit la courbe de charge depuis autant de jours en arrière jusqu'à aujourd'hui, avec une requête par point de comptage et par jour, deux pour un point de comptage hors d'une communauté énergétique. Salzburg Netz livre parfois un jour d'abord sous forme de valeurs provisoires (0, marquées comme valeurs de remplacement) et les valeurs mesurées un jour ou plus tard ; les jours compris dans cette période sont alors corrigés dans les statistiques. Plus de jours rendent les réponses plus volumineuses, pas les requêtes plus fréquentes. La première importation couvre au moins ces jours, même sans historique. Au moins 2 jours : un jour est publié le lendemain, et la première mise à jour de ce jour-là peut avoir lieu avant la publication.",
+          "history": "Jusqu'où remonte la première importation d'un point de comptage. Elle lit un mois par requête et par point de comptage, deux pour une période hors d'une communauté énergétique : un an demande jusqu'à 26 requêtes par point de comptage, trois ans jusqu'à 74, en plus des mises à jour. L'API refuse des requêtes quand il en arrive trop ; une lecture refusée est retentée lors d'une mise à jour ultérieure. Utilisé seulement tant qu'un point de comptage n'a pas encore de statistiques, c'est-à-dire à la configuration ou pour un point de comptage ajouté plus tard ; le modifier n'importe rien pour les autres.",
+          "scan_interval": "Le temps entre deux mises à jour, en minutes (au moins 60). Salzburg Netz publie chaque jour une fois, entre 10 h et 12 h, et une période n'est lue qu'une fois par jour ; un intervalle plus court ne récupère donc pas les valeurs plus tôt."
+        }
+      }
+    },
+    "error": {
+      "invalid_metering_points": "Saisissez des points de comptage de 33 caractères (AT…) ou des numéros d'installation à 10 chiffres (003…), séparés par des virgules.",
+      "no_metering_points": "Choisissez au moins un point de comptage."
+    }
+  },
+  "selector": {
+    "history": {
+      "options": {
+        "none": "Aucun : seulement les jours relus",
+        "month": "Un mois",
+        "year": "Un an",
+        "maximum": "Trois ans, le maximum que fournit l'API"
       }
     }
   }

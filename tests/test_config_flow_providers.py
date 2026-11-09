@@ -36,10 +36,6 @@ CASES = [
      _hashed("dsmr", "socket://meter:23")),
     ("awattar", {"market_area": "AT"}, {"market_area": "DE"},
      "aWATTar market prices (Germany)", {"market_area": "DE"}, "awattar_de"),
-    ("salzburgnetz", {"api_key": None, "gpnr": None, "metering_points": ""},
-     {"api_key": " key ", "gpnr": " 10000000 ", "metering_points": " AT0040000000000000000000000000001 "},
-     "Salzburg Netz (10000000)", {"api_key": "key", "gpnr": "10000000", "metering_points": "AT0040000000000000000000000000001"},
-     "salzburgnetz_10000000"),
 ]
 
 
@@ -166,7 +162,9 @@ def test_every_provider_has_its_flow() -> None:
 
 
 def test_providers_add_their_steps() -> None:
-    """The steps of the provider mixins are steps of the config flow."""
-    from custom_components.asm.config_flow import AustriaSmartMeterConfigFlow
+    """The steps of the provider mixins are steps of the config and the options flow."""
+    from custom_components.asm.config_flow import AustriaSmartMeterConfigFlow, AustriaSmartMeterOptionsFlow
 
     assert callable(AustriaSmartMeterConfigFlow.async_step_qualification)
+    assert callable(AustriaSmartMeterConfigFlow.async_step_salzburgnetz)
+    assert callable(AustriaSmartMeterOptionsFlow.async_step_salzburgnetz)

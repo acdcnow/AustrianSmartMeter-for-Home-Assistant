@@ -42,8 +42,9 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
         self.provider: str = entry.data.get(CONF_PROVIDER, PROVIDER_WIENER_NETZE)
-        # Every provider reads what it needs out of the entry data.
-        self.client = get_client(self.provider, entry.data)
+        # Every provider reads what it needs out of the entry data; a setting
+        # changed in the options takes precedence over the one from the setup.
+        self.client = get_client(self.provider, {**entry.data, **entry.options})
         self._entry = entry
         # A client is synchronous and holds one portal session: a poll and a
         # statistics import take turns with it.

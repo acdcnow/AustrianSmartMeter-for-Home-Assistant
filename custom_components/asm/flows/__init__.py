@@ -12,7 +12,11 @@ from .energiedaten import EnergiedatenFlow
 from .energylive import EnergyliveFlow
 from .ewerk_goesting import EwerkGoestingFlow
 from .netz_noe import NetzNoeFlow
-from .salzburgnetz import SalzburgNetzFlow
+from .salzburgnetz import (
+    SalzburgNetzConfigFlowMixin,
+    SalzburgNetzFlow,
+    SalzburgNetzOptionsFlowMixin,
+)
 from .selectra import SelectraConfigFlowMixin, SelectraFlow
 from .wiener_netze import WienerNetzeFlow
 
@@ -32,8 +36,8 @@ PROVIDER_FLOWS: dict[str, ProviderFlow] = {
 }
 
 # The steps providers add to the config flow and to the options flow.
-CONFIG_FLOW_MIXINS = (SelectraConfigFlowMixin,)
-OPTIONS_FLOW_MIXINS: tuple[type, ...] = ()
+CONFIG_FLOW_MIXINS = (SelectraConfigFlowMixin, SalzburgNetzConfigFlowMixin)
+OPTIONS_FLOW_MIXINS = (SalzburgNetzOptionsFlowMixin,)
 
 
 def provider_flow(provider: str) -> ProviderFlow:
