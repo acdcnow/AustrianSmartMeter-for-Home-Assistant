@@ -356,7 +356,9 @@ def _login_error(rows: dict[str, tuple[str, Any]]) -> str | None:
     return None
 
 
-def _login_failure(message: str, username: str) -> SmartmeterError:
+def _login_failure(
+    message: str, username: str, provider_name: str = "E-Werk Gösting"
+) -> SmartmeterError:
     """Return the error for a login that the portal answered with ``message``.
 
     Only a rejection of the credentials is a SmartmeterLoginError: that one ends in
@@ -371,11 +373,11 @@ def _login_failure(message: str, username: str) -> SmartmeterError:
     words = (account.sub(" ", message) if account else message).lower()
     if any(word in words for word in _CREDENTIAL_WORDS):
         return SmartmeterLoginError(
-            "The E-Werk Gösting portal rejected the e-mail address or password "
+            f"The {provider_name} portal rejected the e-mail address or password "
             f"(portal message: {text[:120]!r})."
         )
     return SmartmeterConnectionError(
-        "The E-Werk Gösting portal could not log in "
+        f"The {provider_name} portal could not log in "
         f"(portal message: {text[:120]!r}). It may be down; please try again later."
     )
 
@@ -687,7 +689,11 @@ def _history_start(asset: dict[str, Any], point: dict[str, Any]) -> date | None:
 
 
 def _anlage_info(
-    asset: dict[str, Any], point: dict[str, Any], zaehlpunkt: str
+    asset: dict[str, Any],
+    point: dict[str, Any],
+    zaehlpunkt: str,
+    device_model: str = DEVICE_MODEL,
+    grid_operator: str = GRID_OPERATOR,
 ) -> dict[str, Any]:
     """Describe an Anlage (sidebar ``asset`` plus asset-details metering point).
 
@@ -714,7 +720,7 @@ def _anlage_info(
         "zaehlpunktnummer": zaehlpunkt,
         "zaehlpunktName": f"{place} ({label})" if street else label,
         "zaehlpunktAnlagentyp": "PRODUCING" if producing else "CONSUMING",
-        "device_model": DEVICE_MODEL,
+        "device_model": device_model,
         "anlage_id": str(anlage_id),
     }
     info.update(_compact((
@@ -745,7 +751,7 @@ def _anlage_info(
     ))
     if address:
         info["verbrauchsstelle"] = address
-    info["netzbetreiber"] = _text(point.get("nb")) or GRID_OPERATOR
+    info["netzbetreiber"] = _text(point.get("nb")) or grid_operator
     info.update(_compact((("lieferant", _text(point.get("elName"))),)))
     return info
 
@@ -753,11 +759,21 @@ def _anlage_info(
 # -------------------------------------------------------------------- client
 
 
-class EwerkGoestingClient(SmartmeterClient):
-    """Client for the E-Werk Gösting customer portal (mein-portal.at)."""
+class MeinPortalClient(SmartmeterClient):
+    """Client for WPO Frontend (*.mein-portal.at) customer portals."""
+
+    PORTAL_HOST = "https://goesting-dav.mein-portal.at"
+    PROVIDER_NAME = "E-Werk Gösting"
+    GRID_OPERATOR = "E-Werk Gösting Stromversorgungs GmbH"
+    DEVICE_MODEL = "E-Werk Gösting 15-minute values"
 
     def __init__(self, username, password):
         super().__init__((username or "").strip(), password or "")
+        self.portal_host = self.PORTAL_HOST
+        self.portal_base = f"{self.portal_host}/bkp"
+        self.login_url = f"{self.portal_base}/login"
+        self.service_zone_url = f"{self.portal_base}/service-zone"
+        self.dashboard_url = f"{self.portal_base}/dashboard"
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self._login_time: datetime | None = None
@@ -818,7 +834,7 @@ class EwerkGoestingClient(SmartmeterClient):
         """
         if not self.username or not self.password:
             raise SmartmeterLoginError(
-                "E-Werk Gösting needs the e-mail address and the password of the "
+                f"{self.PROVIDER_NAME} needs the e-mail address and the password of the "
                 "customer portal."
             )
         self._reset()
@@ -826,8 +842,8 @@ class EwerkGoestingClient(SmartmeterClient):
         refused = self._login_attempt(action_id)
         if refused is not None:
             LOGGER.debug(
-                "E-Werk Gösting: login action %s not accepted (%s), looking it up "
-                "on the login page", action_id, refused,
+                "%s: login action %s not accepted (%s), looking it up "
+                "on the login page", self.PROVIDER_NAME, action_id, refused,
             )
             found, detail = self._discover_login_action()
             if found is not None:
@@ -836,14 +852,14 @@ class EwerkGoestingClient(SmartmeterClient):
                 action_id = found
             if refused is not None:
                 raise SmartmeterConnectionError(
-                    "The E-Werk Gösting portal did not accept its login action "
+                    f"The {self.PROVIDER_NAME} portal did not accept its login action "
                     f"({refused}), {detail}. The portal may be down or may have been "
                     "updated; please try again later, and open an issue if this "
                     "persists."
                 )
         self._action_id = action_id
         self._login_time = datetime.now(timezone.utc)
-        LOGGER.debug("E-Werk Gösting: logged in with login action %s", action_id)
+        LOGGER.debug("%s: logged in with login action %s", self.PROVIDER_NAME, action_id)
         return self
 
     def _login_body(self) -> bytes:
@@ -871,12 +887,12 @@ class EwerkGoestingClient(SmartmeterClient):
             "Accept": "text/x-component",
             "Content-Type": "text/plain;charset=UTF-8",
             "Next-Action": action_id,
-            "Origin": PORTAL_HOST,
+            "Origin": self.portal_host,
         }
         failure = None
         try:
             response = self.session.request(
-                "POST", LOGIN_URL, data=self._login_body(), headers=headers,
+                "POST", self.login_url, data=self._login_body(), headers=headers,
                 timeout=REQUEST_TIMEOUT, allow_redirects=False,
             )
         except requests.exceptions.RequestException as err:
@@ -885,14 +901,14 @@ class EwerkGoestingClient(SmartmeterClient):
             # Raised outside the handler, so that the error does not keep the
             # request (with the password in its body) as its __context__.
             raise SmartmeterConnectionError(
-                f"The login request to {LOGIN_URL} failed ({failure})."
+                f"The login request to {self.login_url} failed ({failure})."
             )
 
         status = response.status_code
         content_type = response.headers.get("Content-Type", "")
         LOGGER.debug(
-            "E-Werk Gösting: login action %s answered HTTP %s (%s)",
-            action_id, status, content_type or "no content type",
+            "%s: login action %s answered HTTP %s (%s)",
+            self.PROVIDER_NAME, action_id, status, content_type or "no content type",
         )
         if status == 303:
             redirect = response.headers.get("x-action-redirect", "")
@@ -902,10 +918,10 @@ class EwerkGoestingClient(SmartmeterClient):
                 for cookie in self.session.cookies
             ):
                 if target != "/service-zone":
-                    LOGGER.debug("E-Werk Gösting: the login leads to %s", target)
+                    LOGGER.debug("%s: the login leads to %s", self.PROVIDER_NAME, target)
                 return None
             raise SmartmeterConnectionError(
-                f"The E-Werk Gösting portal answered the login with a redirect to "
+                f"The {self.PROVIDER_NAME} portal answered the login with a redirect to "
                 f"{target or 'nowhere'} but set no session. Log in once in a browser "
                 "to see what the portal asks for."
             )
@@ -915,14 +931,14 @@ class EwerkGoestingClient(SmartmeterClient):
             return f"HTTP {status}, {content_type or 'no content type'}"
         if not success:
             raise SmartmeterConnectionError(
-                f"The E-Werk Gösting portal answered the login with HTTP {status} "
+                f"The {self.PROVIDER_NAME} portal answered the login with HTTP {status} "
                 f"({content_type or 'no content type'}); please try again later."
             )
         message = _login_error(_parse_flight(response.content))
         if message is not None:
-            raise _login_failure(message, self.username)
+            raise _login_failure(message, self.username, self.PROVIDER_NAME)
         raise SmartmeterConnectionError(
-            f"The E-Werk Gösting portal answered the login with HTTP {status}, but "
+            f"The {self.PROVIDER_NAME} portal answered the login with HTTP {status}, but "
             "neither logged in nor rejected the credentials."
         )
 
@@ -931,22 +947,22 @@ class EwerkGoestingClient(SmartmeterClient):
 
         Returns the id, or None and what was found instead (for the error message).
         """
-        response = self._request("GET", LOGIN_URL)
+        response = self._request("GET", self.login_url)
         if response.status_code != 200:
             return None, f"and its login page answered HTTP {response.status_code}"
         page = response.content.decode("utf-8", "replace")
         chunks = list(dict.fromkeys(_CHUNK_URL.findall(page)))
         LOGGER.debug(
-            "E-Werk Gösting: looking for the login action in %d script(s)", len(chunks)
+            "%s: looking for the login action in %d script(s)", self.PROVIDER_NAME, len(chunks)
         )
         for path in chunks:
-            chunk = self._request("GET", PORTAL_HOST + path)
+            chunk = self._request("GET", self.portal_host + path)
             if chunk.status_code != 200:
                 continue
             match = _LOGIN_ACTION.search(chunk.content.decode("utf-8", "replace"))
             if match:
                 LOGGER.debug(
-                    "E-Werk Gösting: login action %s found in %s", match.group(1), path
+                    "%s: login action %s found in %s", self.PROVIDER_NAME, match.group(1), path
                 )
                 return match.group(1), ""
         return None, (
@@ -970,7 +986,7 @@ class EwerkGoestingClient(SmartmeterClient):
         A lost session is a redirect (HTTP 3xx or in the payload) to the login page
         or, for a dashboard page, to the service zone.
         """
-        LOGGER.debug("E-Werk Gösting: GET %s", url)
+        LOGGER.debug("%s: GET %s", self.PROVIDER_NAME, url)
         dashboard = urlsplit(url).path.startswith(_DASHBOARD_PAGES)
 
         def lost(path: str) -> bool:
@@ -1001,13 +1017,13 @@ class EwerkGoestingClient(SmartmeterClient):
         try:
             return self._fetch_rsc(url)
         except _SessionLost:
-            LOGGER.debug("E-Werk Gösting: the portal session ended, logging in again")
+            LOGGER.debug("%s: the portal session ended, logging in again", self.PROVIDER_NAME)
         self.login()
         try:
             return self._fetch_rsc(url)
         except _SessionLost:
             raise SmartmeterConnectionError(
-                "The E-Werk Gösting portal ended the session again right after a "
+                f"The {self.PROVIDER_NAME} portal ended the session again right after a "
                 f"new login ({url})."
             ) from None
 
@@ -1031,11 +1047,11 @@ class EwerkGoestingClient(SmartmeterClient):
         for asset in self._assets():
             anlage_id = asset["vertragsID"]
             if asset.get("isVisible") is False:
-                LOGGER.debug("E-Werk Gösting: Anlage %s is hidden", anlage_id)
+                LOGGER.debug("%s: Anlage %s is hidden", self.PROVIDER_NAME, anlage_id)
                 continue
             if asset.get("isContractFinished") is True:
                 LOGGER.debug(
-                    "E-Werk Gösting: the contract of Anlage %s is finished", anlage_id
+                    "%s: the contract of Anlage %s is finished", self.PROVIDER_NAME, anlage_id
                 )
                 continue
             point = self._metering_point(anlage_id)
@@ -1043,20 +1059,20 @@ class EwerkGoestingClient(SmartmeterClient):
             if not zaehlpunkt:
                 self._notice(
                     logging.WARNING, ("no Zählpunkt", anlage_id),
-                    "E-Werk Gösting: the portal names no Zählpunkt for Anlage %s, so "
-                    "it is not read. Please open an issue.", anlage_id,
+                    f"{self.PROVIDER_NAME}: the portal names no Zählpunkt for Anlage {anlage_id}, so "
+                    "it is not read. Please open an issue.",
                 )
                 continue
             if zaehlpunkt in taken:
                 self._notice(
                     logging.WARNING, ("same Zählpunkt", taken[zaehlpunkt], anlage_id),
-                    "E-Werk Gösting: Anlagen %s and %s have the same Zählpunkt %s; "
-                    "only Anlage %s is read", taken[zaehlpunkt], anlage_id, zaehlpunkt,
+                    "%s: Anlagen %s and %s have the same Zählpunkt %s; "
+                    "only Anlage %s is read", self.PROVIDER_NAME, taken[zaehlpunkt], anlage_id, zaehlpunkt,
                     taken[zaehlpunkt],
                 )
                 continue
             taken[zaehlpunkt] = anlage_id
-            info = _anlage_info(asset, point, zaehlpunkt)
+            info = _anlage_info(asset, point, zaehlpunkt, self.DEVICE_MODEL, self.GRID_OPERATOR)
             anlagen.append((anlage_id, info))
             described[zaehlpunkt] = (
                 info["zaehlpunktName"], _history_start(asset, point)
@@ -1066,7 +1082,7 @@ class EwerkGoestingClient(SmartmeterClient):
         self._described.update(described)
         self._anlagen = anlagen
         LOGGER.debug(
-            "E-Werk Gösting: %d Anlage(n): %s", len(anlagen), ", ".join(
+            "%s: %d Anlage(n): %s", self.PROVIDER_NAME, len(anlagen), ", ".join(
                 f"{anlage_id} ({zaehlpunkt})" for zaehlpunkt, anlage_id in taken.items()
             ),
         )
@@ -1078,19 +1094,19 @@ class EwerkGoestingClient(SmartmeterClient):
         The service zone of a logged-in account is only a redirect to the
         dashboard of its default Anlage; that dashboard's sidebar lists them all.
         """
-        rows = self._rsc(SERVICE_ZONE_URL)
+        rows = self._rsc(self.service_zone_url)
         assets = _assets_in(rows)
         if assets:
             return assets
         for path in _redirects(rows):
             match = _DASHBOARD_PATH.search(path)
             if match:
-                return _assets_in(self._rsc(f"{DASHBOARD_URL}/{match.group(1)}/home"))
+                return _assets_in(self._rsc(f"{self.dashboard_url}/{match.group(1)}/home"))
         return []
 
     def _metering_point(self, anlage_id: int) -> dict[str, Any]:
         """Return the metering point of an Anlage from its asset-details page."""
-        rows = self._rsc(f"{DASHBOARD_URL}/{anlage_id}/asset-details")
+        rows = self._rsc(f"{self.dashboard_url}/{anlage_id}/asset-details")
         points = [
             point for point in _dicts_with(rows, "meteringPoint")
             if _text(point.get("meteringPoint"))
@@ -1108,8 +1124,8 @@ class EwerkGoestingClient(SmartmeterClient):
         anlage_id = self._contracts.get(key)
         if anlage_id is None:
             raise SmartmeterQueryError(
-                f"{key or 'An empty Zählpunkt'} is not an Anlage of this E-Werk "
-                "Gösting account."
+                f"{key or 'An empty Zählpunkt'} is not an Anlage of this {self.PROVIDER_NAME} "
+                "account."
             )
         return anlage_id
 
@@ -1130,43 +1146,67 @@ class EwerkGoestingClient(SmartmeterClient):
             "showCurrent": "false", "startDate": _url_date(first),
             "endDate": _url_date(last), "grid": "QH",
         })
-        rows = self._rsc(f"{DASHBOARD_URL}/{anlage_id}/consumption?{query}")
+        rows = self._rsc(f"{self.dashboard_url}/{anlage_id}/consumption?{query}")
         holder = next(_dicts_with(rows, "meteringPointIdentifier"), None)
         if holder is None:
             chart = next(_dicts_with(rows, "consumptionData"), None)
             if chart is not None and chart["consumptionData"] in ({}, []):
                 return []  # a period without values may render no export data
             raise SmartmeterQueryError(
-                f"The E-Werk Gösting consumption page of Anlage {anlage_id} for "
+                f"The {self.PROVIDER_NAME} consumption page of Anlage {anlage_id} for "
                 f"{first} to {last} holds its values in an unknown form; the portal "
                 "may have changed. Please open an issue."
             )
         data = holder.get("data")
         if not isinstance(data, list):
             raise SmartmeterQueryError(
-                f"The E-Werk Gösting consumption page of Anlage {anlage_id} for "
+                f"The {self.PROVIDER_NAME} consumption page of Anlage {anlage_id} for "
                 f"{first} to {last} holds its values in an unknown form."
             )
         items = [
             item for item in data if isinstance(item, dict) and "timeStamp" in item
         ]
-        daily = sum(
-            1 for item in data
+        daily_items = [
+            item for item in data
             if isinstance(item, dict) and "timeStamp" not in item
-            and ("from" in item or "to" in item)
-        )
-        if daily:
-            # Beyond its 15-minute limit the portal answers daily buckets. Nothing
-            # of such an answer is usable, and it must not pass for days without
-            # values either (the statistics would skip them for good).
-            raise SmartmeterQueryError(
-                f"The E-Werk Gösting portal answered {daily} "
-                f"daily value(s) instead of 15-minute values for Anlage {anlage_id}, "
-                f"{first} to {last}."
+            and "from" in item and "to" in item and isinstance(item.get("value"), (int, float))
+        ]
+        if daily_items:
+            # If the portal serves daily values (e.g. before 15-minute granularity is active
+            # or for past days), synthesize 15-minute intervals from the daily buckets.
+            existing_days = {
+                _start_day(_parse_stamp(it["timeStamp"]))
+                for it in items if _parse_stamp(it.get("timeStamp")) is not None
+            }
+            for d_item in daily_items:
+                d_start = _parse_stamp(d_item["from"])
+                d_end = _parse_stamp(d_item["to"])
+                if d_start is None or d_end is None or d_start >= d_end:
+                    continue
+                day = _start_day(d_start)
+                if day in existing_days:
+                    continue
+                val = float(d_item["value"])
+                n_qh = int((d_end - d_start).total_seconds() / (INTERVAL_MINUTES * 60))
+                if n_qh <= 0:
+                    continue
+                qh_val = val / n_qh
+                for i in range(1, n_qh + 1):
+                    stamp = d_start + timedelta(minutes=INTERVAL_MINUTES * i)
+                    items.append({
+                        "timeStamp": stamp.isoformat(),
+                        "value": qh_val,
+                        "unit": d_item.get("unit", "kWh"),
+                        "channelType": d_item.get("channelType"),
+                        "level": "L3",
+                    })
+            LOGGER.debug(
+                "%s: Anlage %s, %s to %s: synthesized 15-minute items from %d daily bucket(s)",
+                self.PROVIDER_NAME, anlage_id, first, last, len(daily_items),
             )
         LOGGER.debug(
-            "E-Werk Gösting: Anlage %s, %s to %s: %d 15-minute item(s)",
-            anlage_id, first, last, len(items),
+            "%s: Anlage %s, %s to %s: %d 15-minute item(s)",
+            self.PROVIDER_NAME, anlage_id, first, last, len(items),
         )
         return items
 
@@ -1192,8 +1232,8 @@ class EwerkGoestingClient(SmartmeterClient):
         if unread:
             self._notice(
                 logging.INFO, ("channels", anlage_id, tuple(unread)),
-                "E-Werk Gösting: Anlage %s also reports %s; only the measured %s "
-                "channels are read", anlage_id,
+                "%s: Anlage %s also reports %s; only the measured %s "
+                "channels are read", self.PROVIDER_NAME, anlage_id,
                 ", ".join(name or "(no channel type)" for name in unread),
                 _MEASURED_CHANNEL,
             )
@@ -1208,8 +1248,8 @@ class EwerkGoestingClient(SmartmeterClient):
             except SmartmeterQueryError as err:
                 self._notice(
                     logging.WARNING, ("register", anlage_id, channel),
-                    "E-Werk Gösting: %s of Anlage %s is not read: %s. Please open an "
-                    "issue.", channel, anlage_id, err,
+                    "%s: %s of Anlage %s is not read: %s. Please open an "
+                    "issue.", self.PROVIDER_NAME, channel, anlage_id, err,
                 )
                 errors[obis] = f"{channel} is not read: {err}"
                 continue
@@ -1249,15 +1289,15 @@ class EwerkGoestingClient(SmartmeterClient):
                 merged.setdefault((channel, instant), (instant, item))
         if unusable:
             LOGGER.debug(
-                "E-Werk Gösting: %d item(s) of Anlage %s lie outside %s to %s or "
-                "carry no usable timestamp", unusable, anlage_id, start, end,
+                "%s: %d item(s) of Anlage %s lie outside %s to %s or "
+                "carry no usable timestamp", self.PROVIDER_NAME, unusable, anlage_id, start, end,
             )
         values = self._register_values(anlage_id, list(merged.values()))
         self._periods[anlage_id] = (start, end, now, values)
         return values
 
     def consumptions(self) -> list[dict[str, Any]]:
-        """E-Werk Gösting has no ready made statistics.
+        """Return ready made statistics (none for mein-portal.at).
 
         The day totals are the readings' ``messwerte``, and the quarter hours go
         into the long-term statistics with their real timestamps (statistics.py).
@@ -1287,7 +1327,7 @@ class EwerkGoestingClient(SmartmeterClient):
             history_start, now,
         )
         LOGGER.debug(
-            "E-Werk Gösting: Anlage %s, %s to %s: %s", anlage_id, start, end,
+            "%s: Anlage %s, %s to %s: %s", self.PROVIDER_NAME, anlage_id, start, end,
             ", ".join(
                 f"{item['obisCode']} {item['records_read']}"
                 + (" (not read)" if "error" in item else "")
@@ -1297,8 +1337,27 @@ class EwerkGoestingClient(SmartmeterClient):
         for item in readings:
             if item["held_back"]:
                 LOGGER.debug(
-                    "E-Werk Gösting: Anlage %s, %s: %d quarter hour(s) held back "
-                    "until %s, while the portal may still change them", anlage_id,
+                    "%s: Anlage %s, %s: %d quarter hour(s) held back "
+                    "until %s, while the portal may still change them", self.PROVIDER_NAME, anlage_id,
                     item["obisCode"], item["held_back"], item["settles_at"],
                 )
         return readings
+
+
+class EwerkGoestingClient(MeinPortalClient):
+    """Client for the E-Werk Gösting customer portal (mein-portal.at)."""
+
+    PORTAL_HOST = "https://goesting-dav.mein-portal.at"
+    PROVIDER_NAME = "E-Werk Gösting"
+    GRID_OPERATOR = "E-Werk Gösting Stromversorgungs GmbH"
+    DEVICE_MODEL = "E-Werk Gösting 15-minute values"
+
+
+class StadtwerkeAmstettenClient(MeinPortalClient):
+    """Client for the Stadtwerke Amstetten customer portal (mein-portal.at)."""
+
+    PORTAL_HOST = "https://amstetten-dav.mein-portal.at"
+    PROVIDER_NAME = "Stadtwerke Amstetten"
+    GRID_OPERATOR = "Stadtwerke Amstetten GmbH"
+    DEVICE_MODEL = "Stadtwerke Amstetten 15-minute values"
+

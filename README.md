@@ -43,6 +43,7 @@ statistics the Energy dashboard needs.
 | **Selectra tariff planning** | ✅ Supported | Third-party tariff API, personal token required. Free tier: 60 calls/month |
 | **Salzburg Netz** | ✅ Supported | API key from the service portal + customer number. 15-minute load profiles |
 | **E-Werk Gösting** | ✅ Supported | Web portal account (mein-portal.at). 15-minute consumption and production per Anlage |
+| **Stadtwerke Amstetten** | ✅ Supported | Web portal account (mein-portal.at). 15-minute consumption and production per Anlage |
 | **Stromnetz Graz** | 🚧 Planned | In development |
 
 > **Requirements:** Home Assistant **2026.9** or newer.
@@ -372,6 +373,19 @@ days among the last four days (about two and a half days after the day).
 > does contain your Anlage and Zählpunkt numbers and can contain your e-mail and street
 > address - check it before you post it.
 
+### Stadtwerke Amstetten
+
+[Stadtwerke Amstetten](https://stadtwerke.amstetten.at) provides customer consumption and production
+data via its web portal at [amstetten-dav.mein-portal.at](https://amstetten-dav.mein-portal.at/bkp/login),
+which shares the same WPO Frontend platform as E-Werk Gösting:
+
+1. Make sure you can log in to the customer portal in a browser - the integration uses the same account credentials.
+2. Add the integration and select **Stadtwerke Amstetten**.
+3. Enter the **e-mail address** and **password** of your portal account.
+
+The behavior, sensor entities, 15-minute load profiles, and long-term statistics for Home Assistant's
+Energy dashboard work identically to E-Werk Gösting described above.
+
 ## ✨ Features
 
 * **Easy setup:** configuration directly through the Home Assistant UI (config flow).
@@ -446,7 +460,7 @@ Since this is a custom integration, add it as a **custom repository**:
    For **Salzburg Netz** enter the API key and customer number (GPNR) from the service
    portal; the metering points are optional.
    For **energiedaten.at** enter the **API key** of its dashboard as well.
-   For **E-Werk Gösting** enter the e-mail address and password of the customer portal
+   For **E-Werk Gösting** and **Stadtwerke Amstetten** enter the e-mail address and password of the customer portal
    (mein-portal.at).
 6. Upon successful login, your meters will be added automatically.
 
