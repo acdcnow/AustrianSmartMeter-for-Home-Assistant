@@ -1166,19 +1166,43 @@ class MeinPortalClient(SmartmeterClient):
         items = [
             item for item in data if isinstance(item, dict) and "timeStamp" in item
         ]
-        daily = sum(
-            1 for item in data
+        daily_items = [
+            item for item in data
             if isinstance(item, dict) and "timeStamp" not in item
-            and ("from" in item or "to" in item)
-        )
-        if daily:
-            # Beyond its 15-minute limit the portal answers daily buckets. Nothing
-            # of such an answer is usable, and it must not pass for days without
-            # values either (the statistics would skip them for good).
-            raise SmartmeterQueryError(
-                f"The {self.PROVIDER_NAME} portal answered {daily} "
-                f"daily value(s) instead of 15-minute values for Anlage {anlage_id}, "
-                f"{first} to {last}."
+            and "from" in item and "to" in item and isinstance(item.get("value"), (int, float))
+        ]
+        if daily_items:
+            # If the portal serves daily values (e.g. before 15-minute granularity is active
+            # or for past days), synthesize 15-minute intervals from the daily buckets.
+            existing_days = {
+                _start_day(_parse_stamp(it["timeStamp"]))
+                for it in items if _parse_stamp(it.get("timeStamp")) is not None
+            }
+            for d_item in daily_items:
+                d_start = _parse_stamp(d_item["from"])
+                d_end = _parse_stamp(d_item["to"])
+                if d_start is None or d_end is None or d_start >= d_end:
+                    continue
+                day = _start_day(d_start)
+                if day in existing_days:
+                    continue
+                val = float(d_item["value"])
+                n_qh = int((d_end - d_start).total_seconds() / (INTERVAL_MINUTES * 60))
+                if n_qh <= 0:
+                    continue
+                qh_val = val / n_qh
+                for i in range(1, n_qh + 1):
+                    stamp = d_start + timedelta(minutes=INTERVAL_MINUTES * i)
+                    items.append({
+                        "timeStamp": stamp.isoformat(),
+                        "value": qh_val,
+                        "unit": d_item.get("unit", "kWh"),
+                        "channelType": d_item.get("channelType"),
+                        "level": "L3",
+                    })
+            LOGGER.debug(
+                "%s: Anlage %s, %s to %s: synthesized 15-minute items from %d daily bucket(s)",
+                self.PROVIDER_NAME, anlage_id, first, last, len(daily_items),
             )
         LOGGER.debug(
             "%s: Anlage %s, %s to %s: %d 15-minute item(s)",
