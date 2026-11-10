@@ -261,6 +261,13 @@ async def test_coordinator_prefers_the_options(hass: HomeAssistant) -> None:
     assert (client.metering_points, client.reread_days, client.history) == ([OTHER], 2, "none")
 
 
+@pytest.mark.parametrize(("data", "months"), [({**CREDENTIALS, "metering_points": OWN}, 3), ({"provider": "awattar", "market_area": "at"}, 1)])
+async def test_months_per_history_read(hass: HomeAssistant, data: dict, months: int) -> None:
+    """Salzburg Netz reads the history three months per request, the other providers one."""
+    coordinator = AustriaSmartMeterCoordinator(hass, _entry(hass, **data))
+    assert coordinator._statistics._months_per_read == months
+
+
 async def test_device_removal_only_for_unread_metering_points(hass: HomeAssistant) -> None:
     """A device can be deleted once its metering point is no longer read."""
     entry = _entry(hass, **CREDENTIALS)

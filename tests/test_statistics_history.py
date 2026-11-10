@@ -46,9 +46,11 @@ class _History:
     def __init__(self, history_start: date, values_from: date, refusals: list[date]) -> None:
         self.history_start, self.values_from, self.refusals = history_start, values_from, list(refusals)
         self.firsts: list[date] = []
+        self.ranges: list[tuple[date, date]] = []
 
     async def __call__(self, zaehlpunkt: str, first: date, last: date) -> list[dict]:
         self.firsts.append(first)
+        self.ranges.append((first, last))
         if first in self.refusals:
             self.refusals.remove(first)
             raise SmartmeterConnectionError("HTTP 429 (too many requests, retry later)")
@@ -61,6 +63,7 @@ async def _import(hass: HomeAssistant, importer: statistics.StatisticsImporter, 
     """Run the import of a poll that read the last three days; return the statistic's hours."""
     poll = {POINT: {"readings": [_reading(history.history_start, _intervals(TODAY - timedelta(days=3), TODAY - timedelta(days=1)))]}}
     history.firsts.clear()
+    history.ranges.clear()
     with patch.object(statistics, "_today", return_value=TODAY):
         await importer.async_import(poll)
     await async_wait_recording_done(hass)
@@ -100,3 +103,33 @@ async def test_an_empty_recent_month_is_read_again(recorder_mock: Recorder, hass
     assert await _import(hass, importer, history) == []
     assert await _import(hass, importer, history) == []
     assert history.firsts == [date(2026, 11, 1)]
+
+
+def test_runs_of_three_months() -> None:
+    """Runs of three months start at the first day and end at the last one."""
+    assert list(statistics._months(date(2025, 11, 10), date(2026, 11, 9), 3)) == [
+        (date(2025, 11, 10), date(2026, 1, 31)),
+        (date(2026, 2, 1), date(2026, 4, 30)),
+        (date(2026, 5, 1), date(2026, 7, 31)),
+        (date(2026, 8, 1), date(2026, 10, 31)),
+        (date(2026, 11, 1), date(2026, 11, 9)),
+    ]
+    assert len(list(statistics._months(date(2023, 11, 10), date(2026, 11, 9), 3))) == 13
+
+
+async def test_the_history_is_read_three_months_at_a_time(recorder_mock: Recorder, hass: HomeAssistant) -> None:
+    """Each read covers three months; the empty ones before a refused read are not read again."""
+    history = _History(date(2026, 1, 1), date(2026, 7, 1), [date(2026, 7, 1)])
+    importer = statistics.StatisticsImporter(hass, history, months_per_read=3)
+
+    assert await _import(hass, importer, history) == []
+    assert history.ranges == [
+        (date(2026, 1, 1), date(2026, 3, 31)), (date(2026, 4, 1), date(2026, 6, 30)), (date(2026, 7, 1), date(2026, 9, 30)),
+    ]
+
+    rows = await _import(hass, importer, history)
+    assert history.ranges == [(date(2026, 7, 1), date(2026, 9, 30)), (date(2026, 10, 1), TODAY)]
+    assert rows[0]["start"] == _midnight(date(2026, 7, 1)).timestamp()
+    end = _midnight(TODAY + timedelta(days=1))
+    assert len(rows) == (end.timestamp() - _midnight(date(2026, 7, 1)).timestamp()) // 3600
+    assert rows[-1]["sum"] == pytest.approx(len(rows) * 4 / 1000)

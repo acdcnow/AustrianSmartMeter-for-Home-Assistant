@@ -51,7 +51,9 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._client_lock = asyncio.Lock()
         # Imports the readings that carry a statistic_id into the long-term
         # statistics, in the background (statistics.py).
-        self._statistics = StatisticsImporter(hass, self._async_read_history)
+        self._statistics = StatisticsImporter(
+            hass, self._async_read_history, self.client.history_months_per_read
+        )
         self._shut_down = False
         # Cancels the refresh scheduled for held-back values (settles_at), if any.
         self._settle_refresh: CALLBACK_TYPE | None = None

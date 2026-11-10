@@ -222,9 +222,9 @@ imported. `profile` is not requested while `profile_eg` covers every day read.
   The minimum is 2 because a day is published on the following day, and that day's first
   update can run before the publication.
 * **History of the first import** (default one year): none, one month, one year or three
-  years. The first import of a metering point reads its history one month per request,
-  two for a time outside an energy community, so a year costs up to 26 requests per
-  metering point and three years up to 74. It only runs while a
+  years. The first import of a metering point reads its history three months per
+  request, two requests for a time outside an energy community, so a year costs up to
+  10 requests per metering point and three years up to 26. It only runs while a
   metering point has no statistics yet: at setup, or for a metering point added later.
   Even with none, the days read again are imported.
 

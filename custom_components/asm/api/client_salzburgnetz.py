@@ -68,10 +68,10 @@ The consumption and feed-in registers therefore also carry their quarter hours a
 imports them into Home Assistant's long-term statistics with their real timestamps,
 which is what the Energy dashboard uses - the entity itself only shows the most
 recent quarter hour of a load profile that is published once a day. The first
-import reads the history a month at a time from ``history_start`` on, as far back
-as the entry's history setting says (one year by default; the API would accept
-three, but it refuses requests when too many arrive). Those reads are not cached:
-each month is read once.
+import reads the history three months at a time from ``history_start`` on, as far
+back as the entry's history setting says (one year by default; the API would
+accept three, but it refuses requests when too many arrive). Those reads are not
+cached: each period is read once.
 
 Each poll reads the last few days again (the re-read setting), because the operator
 can deliver a day as placeholders first and its measured values later; the
@@ -250,9 +250,14 @@ _STATISTIC_REGISTERS = {
 HISTORY_YEARS = 3
 
 # How far back the first statistics import reads by default (HISTORY_YEAR): one
-# year, 13 monthly reads. The API would hand out three (HISTORY_MAXIMUM), but it
+# year, five reads. The API would hand out three (HISTORY_MAXIMUM), but it
 # refuses requests when too many arrive.
 IMPORT_YEARS = 1
+
+# How many calendar months a history read asks for in one request. Three months of
+# profile_eg (six registers per quarter hour, 21 MB) were answered in 8 s; thirteen
+# were refused with HTTP 400 after 43 s (2026-11).
+HISTORY_MONTHS_PER_READ = 3
 
 # The suffix after the register ("1-1:1.9.0 G.01"). In ``profile_eg``, "G.01" with
 # no energy community named is the metering point's measured total; the other
@@ -1103,6 +1108,8 @@ class _TooManyRequests(SmartmeterConnectionError):
 class SalzburgNetzClient(SmartmeterClient):
     """Client for the Salzburg Netz service portal API."""
 
+    history_months_per_read = HISTORY_MONTHS_PER_READ
+
     def __init__(
         self,
         token: str | None,
@@ -1432,8 +1439,8 @@ class SalzburgNetzClient(SmartmeterClient):
         for a day of the period that is over, and then the quarter hours without a
         ``profile_eg`` row take its values (_measured). A history read (``cache``
         False) is neither cached - the first statistics import reads its history a
-        month at a time, and each month only once - nor warned about when empty: a
-        month before the meter delivered values has none.
+        few months at a time, and each period only once - nor warned about when
+        empty: a period before the meter delivered values has none.
         """
         cache_key = (identifier, ab, bis)
         cached = self._profiles.get(cache_key)
