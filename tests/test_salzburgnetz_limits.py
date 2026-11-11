@@ -124,6 +124,14 @@ def test_a_load_profile_pauses_per_metering_point() -> None:
     assert client.session.request.call_count == 3
 
 
+def test_a_refused_date_names_its_reason() -> None:
+    """The reason of a refused date is in ``details``."""
+    refusal = {"error": "Überprüfung fehlgeschlagen/Validation failed", "details": "BIS darf nicht in der Zukunft liegen."}
+    client = _client(_response(400, payload=refusal))
+    with pytest.raises(module.SmartmeterQueryError, match="returned HTTP 400: BIS darf nicht in der Zukunft liegen."):
+        client._post(module.PROFILE_URLS["profile_eg"], {"ZP": OWN})
+
+
 def test_retry_after_as_a_date() -> None:
     """Retry-After can also name the moment."""
     now = datetime(2026, 11, 7, 18, 0, tzinfo=timezone.utc)

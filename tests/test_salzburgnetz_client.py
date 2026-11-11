@@ -51,8 +51,8 @@ def _client(**settings) -> SalzburgNetzClient:
 
 @pytest.fixture(autouse=True)
 def _today():
-    """Fix the client's day."""
-    with patch.object(module, "_today", return_value=TODAY):
+    """Fix the client's day, in Vienna and at the API."""
+    with patch.object(module, "_today", return_value=TODAY), patch.object(module, "_api_today", return_value=TODAY):
         yield
 
 
@@ -280,3 +280,24 @@ def test_poll_is_cached_and_history_read_is_not() -> None:
         client.historical_data(OWN, date(2026, 10, 1), date(2026, 10, 31))
         client.historical_data(OWN, date(2026, 10, 1), date(2026, 10, 31))
         assert post.call_count == 6
+
+
+@pytest.mark.parametrize(
+    ("first", "last", "period"),
+    [
+        (None, None, ("2026-11-04", "2026-11-06")),
+        (date(2026, 10, 1), date(2026, 11, 7), ("2026-10-01", "2026-11-06")),
+        (date(2026, 11, 7), date(2026, 11, 7), None),
+    ],
+    ids=["poll", "history", "history after the API's date"],
+)
+def test_no_period_ends_after_the_api_date(first: date | None, last: date | None, period: tuple[str, str] | None) -> None:
+    """For an hour or two after midnight the API's date is still the day before: no period ends after it."""
+    client = _client(reread_days=3)
+    with patch.object(module, "_api_today", return_value=date(2026, 11, 6)), patch.object(client, "_post", return_value=RECORDS[:1]) as post:
+        readings = client.historical_data(OWN, first, last)
+    if period is None:
+        assert post.call_count == 0 and readings == []
+    else:
+        assert post.call_count > 0
+        assert {(call.args[1]["AB"], call.args[1]["BIS"]) for call in post.call_args_list} == {period}

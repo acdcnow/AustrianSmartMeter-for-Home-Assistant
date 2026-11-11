@@ -24,7 +24,9 @@ live probes of the API:
   day, and why the token is checked once a day instead of on every poll.
 * Errors are RFC 7807 style: ``application/problem+json`` with ``error``,
   ``status`` and ``detail``. Verified live: a rejected key answers
-  ``401 {"error": "Unauthorized", "detail": "API-Token ist abgelaufen oder ungültig."}``.
+  ``401 {"error": "Unauthorized", "detail": "API-Token ist abgelaufen oder ungültig."}``,
+  and a refused date ``400 {"error": "Überprüfung fehlgeschlagen/Validation failed",
+  "details": "BIS darf nicht in der Zukunft liegen."}`` (``application/json``).
 
 **The shape of a successful response is not documented.** The document shows its
 example output as a CSV table - ``Datum;Uhrzeit;UTC;Zählpunktbezeichnung;OBIS;OBIS
@@ -52,7 +54,9 @@ of the CSV columns (``Datum`` "12.10.2026", ``Uhrzeit`` "00:00:00", ``UTC`` "+2"
 ``OBIS`` "1-1:1.9.0 P.01", ``Wert`` "0,322…", ``Einheit`` "kWh"). ``Uhrzeit`` is
 the **start** of the quarter hour: a day runs from 00:00:00 to 23:45:00, 96 values.
 ``BIS`` is inclusive, and an ``AB`` more than three years back is refused with
-HTTP 400 ("AB darf nicht länger als 3 Jahre zurückliegen.").
+HTTP 400 ("AB darf nicht länger als 3 Jahre zurückliegen."). So is a ``BIS`` after
+the current date in UTC (2026-11), which is still the day before for an hour after
+midnight in Vienna, two in summer.
 
 Verified live (2026-11): ``/anlage`` answers ``{"PartnerNr": …, "Vertraege": […]}``
 with one row per contract and device of a metering point, ended contracts
@@ -303,6 +307,11 @@ def _vienna() -> tzinfo:
 def _today() -> date:
     """Return the current date in the operator's timezone."""
     return datetime.now(_vienna()).date()
+
+
+def _api_today() -> date:
+    """Return the latest date the API accepts as ``BIS``: the current date in UTC."""
+    return datetime.now(timezone.utc).date()
 
 
 def _scalar(value: Any) -> str:
@@ -1303,7 +1312,8 @@ class SalzburgNetzClient(SmartmeterClient):
                 ) from err
 
         # Errors are RFC 7807 style ("application/problem+json") with `error`,
-        # `status` and `detail` - checked against the live API.
+        # `status` and `detail`, and a refused date has its reason in `details` -
+        # checked against the live API.
         detail = ""
         try:
             payload = response.json()
@@ -1311,7 +1321,11 @@ class SalzburgNetzClient(SmartmeterClient):
             payload = None
         if isinstance(payload, dict):
             detail = str(
-                payload.get("detail") or payload.get("message") or payload.get("error") or ""
+                payload.get("detail")
+                or payload.get("details")
+                or payload.get("message")
+                or payload.get("error")
+                or ""
             )
 
         text = f"{url} returned HTTP {response.status_code}"
@@ -1487,7 +1501,8 @@ class SalzburgNetzClient(SmartmeterClient):
 
         The period is read at most once per day, as the operator asks. An explicit
         period is a history read of the statistics import (statistics.py): it is not
-        cached, and it starts no earlier than the API accepts.
+        cached, and it starts no earlier than the API accepts. No period ends after
+        the API's date (_api_today), and one that starts after it is not requested.
         """
         self._ensure_session()
         identifier = str(zaehlpunktnummer or "").strip()
@@ -1502,9 +1517,13 @@ class SalzburgNetzClient(SmartmeterClient):
         bis = _iso_date(date_until) or _iso_date(today)
         if ab and bis and ab > bis:
             ab, bis = bis, ab
+        latest = _api_today().isoformat()
+        bis = min(bis or latest, latest)
 
-        records = self._profile_records(
-            identifier, ab or "", bis or "", cache=not history
+        records = (
+            []
+            if ab and ab > bis
+            else self._profile_records(identifier, ab or "", bis, cache=not history)
         )
         name = (self._found.get(identifier) or {}).get("zaehlpunktName") or "Smart Meter"
         return _readings_from_profile(
