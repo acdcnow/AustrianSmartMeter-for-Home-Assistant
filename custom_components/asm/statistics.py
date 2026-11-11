@@ -13,7 +13,14 @@ are hourly: the intervals of an hour are summed. ``state`` is the hour's energy,
 dashboard uses.
 
 The first import reads the whole history from the reading's ``history_start``,
-at most three years back. Later imports continue after the last imported hour.
+at most three years back, a month at a time, or several months at a time for a
+client that hands them out in one request (``history_months_per_read``). Later
+imports continue after the last imported hour.
+The leading months that a first import read without finding a complete hour (a
+portal may have no values that far back) are not read again while the
+integration stays loaded, so a first import that ends early, for instance at a
+request limit, goes on after them. Months that ended less than seven days ago are
+read again.
 A missing or incomplete hour holds the import back until the portal delivers it.
 It is skipped, with a warning, once newer values exist for more than seven days
 after it. What could not be read is never taken for a missing hour: a failed read
@@ -104,10 +111,16 @@ def _years_before(day: date, years: int) -> date:
         return day.replace(year=day.year - years, day=28)
 
 
-def _months(first: date, last: date) -> Iterator[tuple[date, date]]:
-    """Split the days ``first`` to ``last`` (inclusive) into calendar months."""
+def _months(first: date, last: date, count: int = 1) -> Iterator[tuple[date, date]]:
+    """Split the days ``first`` to ``last`` (inclusive) into runs of calendar months.
+
+    Each run holds ``count`` months; the first one starts at ``first``, the last one
+    ends at ``last``.
+    """
     while first <= last:
-        following = (first.replace(day=1) + timedelta(days=32)).replace(day=1)
+        following = first.replace(day=1)
+        for _ in range(count):
+            following = (following + timedelta(days=32)).replace(day=1)
         yield first, min(following - timedelta(days=1), last)
         first = following
 
@@ -317,7 +330,10 @@ class _Job:
     hours: dict[int, float] = field(default_factory=dict)
     unusable: int = 0
     read: bool = False  # True when the poll's intervals did not suffice
-    # (first day, last day, reason) of a month whose reading carried an error:
+    # The day after the leading months that a first import read without finding a
+    # complete hour, if any of them ended more than GAP_LIMIT ago
+    empty_until: date | None = None
+    # (first day, last day, reason) of a read whose reading carried an error:
     # nothing of this job is imported in this run
     failed: tuple[date, date, str] | None = None
     # The imported hours whose values changed (see plan_corrections), the hours to
@@ -349,13 +365,23 @@ class _Job:
 class StatisticsImporter:
     """Import the readings that carry a statistic_id into long-term statistics."""
 
-    def __init__(self, hass: HomeAssistant, read_history: ReadHistory) -> None:
-        """Initialize the importer; ``read_history`` reads a range of days."""
+    def __init__(
+        self, hass: HomeAssistant, read_history: ReadHistory, months_per_read: int = 1
+    ) -> None:
+        """Initialize the importer.
+
+        ``read_history`` reads a range of days, up to ``months_per_read`` calendar
+        months at a time.
+        """
         self.hass = hass
         self._read_history = read_history
+        self._months_per_read = max(1, months_per_read)
         self._lock = asyncio.Lock()
         self._recorder_missing_logged = False
         self._warned: set[tuple[Any, ...]] = set()
+        # Statistic id -> the day the first import's next history read starts at
+        # (_Job.empty_until of the last one).
+        self._empty_until: dict[str, date] = {}
 
     @property
     def running(self) -> bool:
@@ -424,6 +450,10 @@ class StatisticsImporter:
         if to_read := [job for job in jobs if job.read]:
             await self._async_read(zaehlpunkt, to_read, today)
         for job in jobs:
+            if job.after is None and not job.hours and job.empty_until is not None:
+                self._empty_until[job.statistic_id] = job.empty_until
+            else:
+                self._empty_until.pop(job.statistic_id, None)
             await self._async_write(job)
 
     async def _async_job(
@@ -457,6 +487,7 @@ class StatisticsImporter:
         rows = last.get(statistic_id) or []
         floor = _years_before(today, MAX_HISTORY_YEARS)
         history_start = max(_day(reading.get("history_start")) or floor, floor)
+        skipped: date | None = None
         if rows:
             after: int | None = int(rows[0]["start"])
             total = round((rows[0].get("sum") or 0.0) * 1000, 3)
@@ -465,6 +496,13 @@ class StatisticsImporter:
         else:
             after, total = None, 0.0
             first_day = history_start
+            empty_until = self._empty_until.get(statistic_id)
+            if empty_until is not None and empty_until > first_day:
+                LOGGER.debug(
+                    "%s: no complete hour before %s; the history read starts there",
+                    statistic_id, empty_until,
+                )
+                first_day = skipped = empty_until
             since = _midnight(first_day)
         return _Job(
             reading=reading,
@@ -476,6 +514,7 @@ class StatisticsImporter:
             first_day=first_day,
             since=since,
             earliest=_midnight(history_start),
+            empty_until=skipped,
         )
 
     async def _async_compare(self, job: _Job, intervals: list[Any]) -> None:
@@ -545,27 +584,26 @@ class StatisticsImporter:
     async def _async_read(
         self, zaehlpunkt: str, jobs: list[_Job], today: date
     ) -> None:
-        """Read what the poll did not, a month at a time, into the jobs.
+        """Read what the poll did not, ``months_per_read`` months at a time.
 
         A failing read ends the reading: the hours from there on count as not
-        published, so no gap is skipped over them. A month whose reading for a job
+        published, so no gap is skipped over them. A read whose reading for a job
         carries an ``error`` marks that job failed (nothing of it is written in
         this run); the other jobs go on.
         """
         first = min(job.first_day for job in jobs)
-        for month_first, month_last in _months(first, today):
+        settled = today - timedelta(seconds=GAP_LIMIT)
+        for read_first, read_last in _months(first, today, self._months_per_read):
             # A read that is over before it is awaited does not give the event
-            # loop a turn: a long backfill yields after every month.
+            # loop a turn: a long backfill yields after every read.
             await asyncio.sleep(0)
             try:
-                readings = await self._read_history(
-                    zaehlpunkt, month_first, month_last
-                )
+                readings = await self._read_history(zaehlpunkt, read_first, read_last)
             except SmartmeterError as err:
                 LOGGER.warning(
                     "The statistics import of %s could not read %s to %s: %s. It "
-                    "goes on with the next poll", zaehlpunkt, month_first,
-                    month_last, str(err).rstrip("."),
+                    "goes on with the next poll", zaehlpunkt, read_first,
+                    read_last, str(err).rstrip("."),
                 )
                 return
             for reading in readings or []:
@@ -575,9 +613,17 @@ class StatisticsImporter:
                     if job.failed or reading.get("statistic_id") != job.statistic_id:
                         continue
                     if error := reading.get("error"):
-                        job.failed = (month_first, month_last, str(error))
+                        job.failed = (read_first, read_last, str(error))
                     else:
                         job.add(reading.get("intervals") or [])
+            for job in jobs:
+                if (
+                    job.after is None
+                    and not job.hours
+                    and not job.failed
+                    and job.first_day <= read_last < settled
+                ):
+                    job.empty_until = read_last + timedelta(days=1)
             if all(job.failed for job in jobs):
                 return
 

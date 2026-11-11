@@ -21,14 +21,30 @@
           "country_code": "Ländercode (z. B. at)",
           "postcode": "Postleitzahl",
           "gpnr": "Kundennummer (GPNR, 8-stellig)",
-          "metering_points": "Zählpunkte (ZP), optional - durch Komma getrennt",
           "username": "Benutzername (E-Mail)",
           "password": "Passwort"
+        },
+        "data_description": {
+          "gpnr": "Die Kundennummer, für die der API-Schlüssel erstellt wurde, wie im Serviceportal angezeigt."
         }
       },
       "qualification": {
         "title": "Selectra: Tarif bestimmen",
         "description": "Selectra identifiziert den Tarif über einen Fragebogen, wobei jede Antwort einen Aufruf des Monatskontingents kostet. Fragen des Typs `json` erwarten ein JSON-Dokument.\n\n{question_list}"
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz: Einstellungen",
+        "description": "Wählen Sie die Zählpunkte, die gelesen werden sollen. Bei jedem steht, was Salzburg Netz dazu angibt, soweit vorhanden: Sparte (Strom, Gas), Anlagenart, Produkt und Adresse und in Klammern die Gerätenummern. Ein Zählpunkt, dessen Verträge alle beendet sind, etwa an einer früheren Adresse, steht am Ende mit dem Vertragszeitraum und ist nicht angehakt.\n\nDie Einstellungen unten legen fest, was gelesen wird und was der erste Import in die Langzeitstatistik schreibt, die das Energie-Dashboard verwendet. Alles lässt sich später in den Optionen der Integration ändern.",
+        "data": {
+          "metering_points": "Zählpunkte",
+          "reread_days": "Tage, die jede Aktualisierung erneut liest",
+          "history": "Verlauf beim ersten Import"
+        },
+        "data_description": {
+          "metering_points": "Gelesen werden nur die angehakten Zählpunkte. Einen, den Salzburg Netz später zu Ihrer Kundennummer hinzufügt, liest die Integration, sobald Sie ihn in den Optionen anhaken. Führt Salzburg Netz keine oder antwortet nicht, geben Sie sie von Hand ein, durch Komma getrennt: 33-stellige Zählpunkte (AT…) oder 10-stellige Anlagennummern (003…).",
+          "reread_days": "Jede Aktualisierung liest das Lastprofil von so vielen Tagen zurück bis heute, mit einer Anfrage pro Zählpunkt und Tag, zwei für einen Zählpunkt außerhalb einer Energiegemeinschaft. Salzburg Netz liefert einen Tag manchmal zuerst als Platzhalter (0, als Ersatzwert markiert) und die gemessenen Werte einen Tag oder später; Tage innerhalb dieses Zeitraums werden dann in der Statistik korrigiert. Mehr Tage machen die Antworten größer, nicht die Anfragen häufiger. Der erste Import umfasst mindestens diese Tage, auch ohne Verlauf. Mindestens 2 Tage: Ein Tag wird am folgenden Tag veröffentlicht, und die erste Aktualisierung dieses Tages kann vor der Veröffentlichung laufen.",
+          "history": "Wie weit der erste Import eines Zählpunkts zurückreicht. Er liest drei Monate pro Anfrage und Zählpunkt, zwei Anfragen für eine Zeit außerhalb einer Energiegemeinschaft: Ein Jahr braucht bis zu 10 Anfragen pro Zählpunkt, drei Jahre bis zu 26, zusätzlich zu den Aktualisierungen. Die API lehnt Anfragen ab, wenn zu viele eintreffen; eine abgelehnte Abfrage wird bei einer späteren Aktualisierung wiederholt. Wird nur verwendet, solange ein Zählpunkt noch keine Statistik hat, also bei der Einrichtung oder für einen später hinzugefügten Zählpunkt; eine Änderung importiert für die anderen nichts."
+        }
       }
     },
     "error": {
@@ -36,7 +52,11 @@
       "invalid_auth": "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Zugangsdaten.",
       "invalid_input": "Der Wert ist ungültig.",
       "no_contracts": "Keine Zählpunkte in diesem Konto gefunden.",
-      "unknown": "Unerwarteter Fehler."
+      "unknown": "Unerwarteter Fehler.",
+      "invalid_metering_points": "Geben Sie 33-stellige Zählpunkte (AT…) oder 10-stellige Anlagennummern (003…) ein, durch Komma getrennt.",
+      "no_metering_points": "Wählen Sie mindestens einen Zählpunkt.",
+      "metering_points_not_listed": "Salzburg Netz hat die Anfrage nach Ihren Zählpunkten nicht beantwortet (den Grund nennt das Protokoll), daher ist der API-Schlüssel noch nicht geprüft. Geben Sie die Zählpunkte von Hand ein, oder schließen Sie diesen Dialog und versuchen Sie es später erneut.",
+      "customer_number_refused": "Salzburg Netz hat die Anfrage für diese Kundennummer abgelehnt (den Grund nennt das Protokoll). Prüfen Sie die Kundennummer und ob der API-Schlüssel für sie erstellt wurde."
     },
     "abort": {
       "already_configured": "Dieses Konto ist bereits konfiguriert."
@@ -48,7 +68,40 @@
         "title": "Einstellungen",
         "data": {
           "scan_interval": "Aktualisierungsintervall (Minuten)"
+        },
+        "data_description": {
+          "scan_interval": "Die Zeit zwischen zwei Aktualisierungen in Minuten (mindestens 60)."
         }
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz: Optionen",
+        "description": "Bei jedem Zählpunkt steht, was Salzburg Netz bei der letzten Anmeldung dazu angegeben hat, soweit vorhanden: Sparte (Strom, Gas), Anlagenart, Produkt und Adresse und in Klammern die Gerätenummern. Einer, dessen Verträge alle beendet sind, steht am Ende mit dem Vertragszeitraum.\n\nBeim Speichern wird die Integration neu geladen und liest danach jeden angehakten Zählpunkt noch einmal.",
+        "data": {
+          "metering_points": "Zählpunkte",
+          "reread_days": "Tage, die jede Aktualisierung erneut liest",
+          "history": "Verlauf beim ersten Import",
+          "scan_interval": "Aktualisierungsintervall (Minuten)"
+        },
+        "data_description": {
+          "metering_points": "Gelesen werden nur die angehakten Zählpunkte. Ein angehakter wird wie unter Verlauf eingestellt importiert; ein abgewählter wird nicht mehr gelesen, seine Statistik bleibt erhalten, und sein Gerät lässt sich danach auf der Geräteseite löschen. Ist die Integration nicht geladen, geben Sie die Zählpunkte von Hand ein, durch Komma getrennt: 33-stellige Zählpunkte (AT…) oder 10-stellige Anlagennummern (003…).",
+          "reread_days": "Jede Aktualisierung liest das Lastprofil von so vielen Tagen zurück bis heute, mit einer Anfrage pro Zählpunkt und Tag, zwei für einen Zählpunkt außerhalb einer Energiegemeinschaft. Salzburg Netz liefert einen Tag manchmal zuerst als Platzhalter (0, als Ersatzwert markiert) und die gemessenen Werte einen Tag oder später; Tage innerhalb dieses Zeitraums werden dann in der Statistik korrigiert. Mehr Tage machen die Antworten größer, nicht die Anfragen häufiger. Der erste Import umfasst mindestens diese Tage, auch ohne Verlauf. Mindestens 2 Tage: Ein Tag wird am folgenden Tag veröffentlicht, und die erste Aktualisierung dieses Tages kann vor der Veröffentlichung laufen.",
+          "history": "Wie weit der erste Import eines Zählpunkts zurückreicht. Er liest drei Monate pro Anfrage und Zählpunkt, zwei Anfragen für eine Zeit außerhalb einer Energiegemeinschaft: Ein Jahr braucht bis zu 10 Anfragen pro Zählpunkt, drei Jahre bis zu 26, zusätzlich zu den Aktualisierungen. Die API lehnt Anfragen ab, wenn zu viele eintreffen; eine abgelehnte Abfrage wird bei einer späteren Aktualisierung wiederholt. Wird nur verwendet, solange ein Zählpunkt noch keine Statistik hat, also bei der Einrichtung oder für einen später hinzugefügten Zählpunkt; eine Änderung importiert für die anderen nichts.",
+          "scan_interval": "Die Zeit zwischen zwei Aktualisierungen in Minuten (mindestens 60). Salzburg Netz veröffentlicht jeden Tag einmal, zwischen 10:00 und 12:00, und ein Zeitraum wird nur einmal am Tag gelesen; ein kürzeres Intervall holt Werte also nicht früher."
+        }
+      }
+    },
+    "error": {
+      "invalid_metering_points": "Geben Sie 33-stellige Zählpunkte (AT…) oder 10-stellige Anlagennummern (003…) ein, durch Komma getrennt.",
+      "no_metering_points": "Wählen Sie mindestens einen Zählpunkt."
+    }
+  },
+  "selector": {
+    "history": {
+      "options": {
+        "none": "Keiner: nur die erneut gelesenen Tage",
+        "month": "Ein Monat",
+        "year": "Ein Jahr",
+        "maximum": "Drei Jahre, das Maximum der API"
       }
     }
   }

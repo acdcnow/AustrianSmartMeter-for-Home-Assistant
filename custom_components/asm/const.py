@@ -40,6 +40,11 @@ CONF_SELECTRA_LABEL = "offer_label"
 CONF_GPNR = "gpnr"
 CONF_METERING_POINTS = "metering_points"
 
+# Salzburg Netz settings: how many past days each poll reads again, and how far back
+# the first statistics import reads.
+CONF_REREAD_DAYS = "reread_days"
+CONF_HISTORY = "history"
+
 # Providers
 PROVIDER_WIENER_NETZE = "wiener_netze"
 PROVIDER_NETZ_NOE = "netz_noe"
@@ -92,11 +97,13 @@ __all__ = [
     "CONF_DSMR_VERSION",
     "CONF_ENCRYPTION_KEY",
     "CONF_GPNR",
+    "CONF_HISTORY",
     "CONF_MARKET_AREA",
     "CONF_METERING_POINTS",
     "CONF_PASSWORD",
     "CONF_POSTCODE",
     "CONF_PROVIDER",
+    "CONF_REREAD_DAYS",
     "CONF_SCAN_INTERVAL",
     "CONF_SELECTRA_INPUTS",
     "CONF_SELECTRA_LABEL",

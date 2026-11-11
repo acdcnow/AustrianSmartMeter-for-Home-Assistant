@@ -16,10 +16,12 @@ from ..const import (
     CONF_DSMR_VERSION,
     CONF_ENCRYPTION_KEY,
     CONF_GPNR,
+    CONF_HISTORY,
     CONF_MARKET_AREA,
     CONF_METERING_POINTS,
     CONF_PASSWORD,
     CONF_PORT,
+    CONF_REREAD_DAYS,
     CONF_SELECTRA_INPUTS,
     CONF_SELECTRA_LABEL,
     CONF_TOKEN,
@@ -76,6 +78,8 @@ def get_client(
             data.get(CONF_API_KEY),
             data.get(CONF_GPNR),
             data.get(CONF_METERING_POINTS),
+            reread_days=data.get(CONF_REREAD_DAYS),
+            history=data.get(CONF_HISTORY),
         )
 
     if provider == PROVIDER_DSMR:

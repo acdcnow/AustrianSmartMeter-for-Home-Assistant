@@ -25,6 +25,7 @@ statistics the Energy dashboard needs.
 - ⚙️ [Configuration](#-configuration)
 - 📊 [Entities & sensors](#-entities--sensors)
 - 🐛 [Troubleshooting & debugging](#-troubleshooting--debugging)
+- 🧪 [Tests](#-tests)
 - 📚 [Documentation](#-documentation)
 - 🗺️ [Roadmap](#-roadmap)
 - 📝 [Changelog](#-changelog)
@@ -179,13 +180,56 @@ data analysis shows:
    Pick a validity period; a key lives at most two years, and up to ten keys can exist.
 2. Add the integration and select **Salzburg Netz**.
 3. Enter the **API key** and your **customer number** (GPNR, 8 digits, starting with 1).
-4. Leave **Metering points** empty to let the integration discover them, or type them in
-   separated by commas - a 33-character metering point (`AT00…`) or a 10-digit facility
-   number (`003…`).
+4. The next step lists the metering points of your customer number as checkboxes, each
+   with what Salzburg Netz says about it: energy (Strom, Gas), facility type, product,
+   address and, in brackets, the meter numbers. The list also holds the metering points
+   of ended contracts, for example at an earlier address; they come last with the
+   contract's period and are not ticked. Only the ticked metering points are read. If the
+   API lists none or does not answer, type them in, separated by commas - a 33-character
+   metering point (`AT00…`) or a 10-digit facility number (`003…`). Without an answer the
+   API key is checked only by the first update.
+5. The same step asks for the settings below. All of them, the metering points included,
+   can be changed later under **Configure** on the integration's entry; saving reloads the
+   integration.
 
 The integration adds a **load profile** sensor per metering point and register: the
 15-minute consumption and feed-in values in `Wh`, with the day's total for that register
-as an attribute next to the meter number and type from the API's device data.
+as an attribute next to the meter number and type from the API's device data. The sensor
+shows the newest quarter hour. The consumption and feed-in values also go into the
+long-term statistics `asm:<metering point>_consumption` and `…_production`, named
+*Smart Meter Consumption (<metering point>)* and *Smart Meter Production (…)*, with their
+real timestamps, for the Energy dashboard (see *Energy dashboard and long-term statistics*
+under E-Werk Gösting for how that import works).
+
+The values are the measured consumption or feed-in of the metering point, also for
+members of an energy community (Energiegemeinschaft). For the time of a membership,
+Salzburg Netz's standard load profile (`profile`) holds only what is left after the
+community's share (`P.01`, "Restverbrauch/-einspeisung"), and the energy community load
+profile (`profile_eg`) holds the measured total (`G.01` without a community) next to the
+community's rows. Outside a membership, `profile_eg` has no values and `profile` holds the
+measured total. So the integration reads `profile_eg` and, where it has no values,
+`profile`: before, during and after a membership. The community's own rows are not
+imported. `profile` is not requested while `profile_eg` covers every day read.
+
+#### Settings
+
+* **Days each update reads again** (default 3, from 2 to 14): each update reads the load
+  profile from this many days back up to today, in one request per metering point and
+  day, two for a metering point outside an energy community. Salzburg Netz sometimes delivers a day as placeholders first (0, marked
+  "Ersatzwert nicht belastbar" or "Wert ist nicht vorhanden") and the measured values a
+  day or more later; the statistics of the days within this window are corrected when
+  their values change. More days make the answers larger, not the requests more frequent.
+  The minimum is 2 because a day is published on the following day, and that day's first
+  update can run before the publication.
+* **History of the first import** (default one year): none, one month, one year or three
+  years. The first import of a metering point reads its history three months per
+  request, two requests for a time outside an energy community, so a year costs up to
+  10 requests per metering point and three years up to 26. It only runs while a
+  metering point has no statistics yet: at setup, or for a metering point added later.
+  Even with none, the days read again are imported.
+
+A metering point removed in the options is no longer read. Its statistics stay, and its
+device can then be deleted on the device page.
 
 > **Two things are worth knowing.** The API is documented as a **POST-only** interface:
 > your key goes into the `Authorization` header, the customer number, metering point and
@@ -197,11 +241,11 @@ as an attribute next to the meter number and type from the API's device data.
 >
 > **The shape of a successful response is not documented.** The operator's description
 > shows its example output as a CSV table; the JSON variant is not published anywhere, and
-> `/docs` or `/openapi.json` do not exist. The parser therefore reads records tolerantly
-> (instead of assuming a structure) and the endpoint addresses, the request body and the
-> error format were verified against the live API, but **the JSON field names are not
-> verified**. If a sensor stays without a value, the log says so and the raw response is
-> worth reporting:
+> `/docs` or `/openapi.json` do not exist. The endpoint addresses, the request body, the
+> error format and the JSON answers of the load profiles and of the facilities (`/anlage`)
+> were checked against the live API, and the parser still reads records tolerantly instead
+> of assuming a structure. If a sensor stays without a value, the log says so and the raw
+> response is worth reporting:
 > [open an issue](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/issues).
 
 The `readings` (meter registers), `consumption` (billed amounts) and `partner` categories
@@ -444,7 +488,7 @@ Since this is a custom integration, add it as a **custom repository**:
    for **aWATTar market prices** the market area, and for **Selectra tariff planning**
    your API token, country code and postcode (followed by its questionnaire).
    For **Salzburg Netz** enter the API key and customer number (GPNR) from the service
-   portal; the metering points are optional.
+   portal (followed by a step with its metering points and settings).
    For **energiedaten.at** enter the **API key** of its dashboard as well.
    For **E-Werk Gösting** enter the e-mail address and password of the customer portal
    (mein-portal.at).
@@ -539,6 +583,18 @@ that has no smart meter portal access yet.
 request with something that was not JSON, which is its way of saying that the session is
 not established. With 1.2.1 and newer this can no longer happen during setup: the login
 endpoint's body is no longer required to be JSON. Please report it if you still see it.
+
+## 🧪 Tests
+
+The tests in `tests/` use Home Assistant's test harness
+(`pytest-homeassistant-custom-component`). They cover the setup of every provider, and
+Salzburg Netz's client, dialogs, texts and entries set up by 1.2.2:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements_test.txt
+.venv/bin/python -m pytest
+```
 
 ## 📝 Changelog
 

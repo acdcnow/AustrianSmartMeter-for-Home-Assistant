@@ -42,15 +42,18 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
         self.provider: str = entry.data.get(CONF_PROVIDER, PROVIDER_WIENER_NETZE)
-        # Every provider reads what it needs out of the entry data.
-        self.client = get_client(self.provider, entry.data)
+        # Every provider reads what it needs out of the entry data; a setting
+        # changed in the options takes precedence over the one from the setup.
+        self.client = get_client(self.provider, {**entry.data, **entry.options})
         self._entry = entry
         # A client is synchronous and holds one portal session: a poll and a
         # statistics import take turns with it.
         self._client_lock = asyncio.Lock()
         # Imports the readings that carry a statistic_id into the long-term
         # statistics, in the background (statistics.py).
-        self._statistics = StatisticsImporter(hass, self._async_read_history)
+        self._statistics = StatisticsImporter(
+            hass, self._async_read_history, self.client.history_months_per_read
+        )
         self._shut_down = False
         # Cancels the refresh scheduled for held-back values (settles_at), if any.
         self._settle_refresh: CALLBACK_TYPE | None = None
