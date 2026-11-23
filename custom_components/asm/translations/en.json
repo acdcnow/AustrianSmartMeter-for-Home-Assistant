@@ -21,14 +21,30 @@
           "country_code": "Country code (e.g. at)",
           "postcode": "Postcode",
           "gpnr": "Customer number (GPNR, 8 digits)",
-          "metering_points": "Metering points (ZP), optional - comma separated",
           "username": "Username (Email)",
           "password": "Password"
+        },
+        "data_description": {
+          "gpnr": "The customer number the API key was created for, as shown in the service portal."
         }
       },
       "qualification": {
         "title": "Selectra: qualify the tariff",
         "description": "Selectra identifies the tariff in a questionnaire, and every answer costs one call of the monthly quota. Questions of the type `json` expect a JSON document.\n\n{question_list}"
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz: settings",
+        "description": "Tick the metering points to read. Each one shows what Salzburg Netz says about it, in its own words and where known: the energy (Strom, Gas), the facility type, the product and the address, and the meter numbers in brackets. A metering point whose contracts have all ended, for example at an earlier address, comes last with the contract's period and is not ticked.\n\nThe settings below decide what is read and what the first import writes into the long-term statistics, which the Energy dashboard uses. You can change everything later in the integration's options.",
+        "data": {
+          "metering_points": "Metering points",
+          "reread_days": "Days each update reads again",
+          "history": "History of the first import"
+        },
+        "data_description": {
+          "metering_points": "Only the ticked metering points are read. One that Salzburg Netz adds to your customer number later is read once you tick it in the options. If Salzburg Netz lists none or does not answer, enter them by hand, separated by commas: 33-character metering points (AT…) or 10-digit facility numbers (003…).",
+          "reread_days": "Each update reads the load profile from this many days back up to today, in one request per metering point and day, two for a metering point outside an energy community. Salzburg Netz sometimes delivers a day as placeholders first (0, marked as a substitute value) and the measured values a day or more later; days within this window are then corrected in the statistics. More days make the answers larger, not the requests more frequent. The first import covers at least these days, even without history. At least 2 days: a day is published on the following day, and that day's first update can run before the publication.",
+          "history": "How far back the first import of a metering point reaches. It reads three months per request and metering point, two requests for a time outside an energy community: one year takes up to 10 requests per metering point, three years up to 26, on top of the updates. The API refuses requests when too many arrive; a refused read is tried again with a later update. Only used while a metering point has no statistics yet, that is at setup or for a metering point added later; changing it imports nothing for the others."
+        }
       }
     },
     "error": {
@@ -36,7 +52,11 @@
       "invalid_auth": "Authentication failed. Please check your credentials.",
       "invalid_input": "The value is invalid.",
       "no_contracts": "No metering points (contracts) found in this account.",
-      "unknown": "Unexpected error."
+      "unknown": "Unexpected error.",
+      "invalid_metering_points": "Enter 33-character metering points (AT…) or 10-digit facility numbers (003…), separated by commas.",
+      "no_metering_points": "Choose at least one metering point.",
+      "metering_points_not_listed": "Salzburg Netz did not answer the request for your metering points (the log has the reason), so the API key is not checked yet. Enter the metering points by hand, or close this dialog and try again later.",
+      "customer_number_refused": "Salzburg Netz refused the request for this customer number (the log has the reason). Check the customer number, and that the API key was created for it."
     },
     "abort": {
       "already_configured": "This account is already configured."
@@ -48,7 +68,40 @@
         "title": "Austria Smartmeter Options",
         "data": {
           "scan_interval": "Update Interval (minutes)"
+        },
+        "data_description": {
+          "scan_interval": "The time between two updates, in minutes (at least 60)."
         }
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz: options",
+        "description": "Each metering point shows what Salzburg Netz said about it at the last login, where known: the energy (Strom, Gas), the facility type, the product and the address, and the meter numbers in brackets. One whose contracts have all ended comes last, with the contract's period.\n\nSaving reloads the integration, which then reads every ticked metering point once more.",
+        "data": {
+          "metering_points": "Metering points",
+          "reread_days": "Days each update reads again",
+          "history": "History of the first import",
+          "scan_interval": "Update Interval (minutes)"
+        },
+        "data_description": {
+          "metering_points": "Only the ticked metering points are read. One you tick is imported as set under history; one you untick is no longer read, its statistics stay, and its device can then be deleted on the device page. If the integration is not loaded, enter them by hand, separated by commas: 33-character metering points (AT…) or 10-digit facility numbers (003…).",
+          "reread_days": "Each update reads the load profile from this many days back up to today, in one request per metering point and day, two for a metering point outside an energy community. Salzburg Netz sometimes delivers a day as placeholders first (0, marked as a substitute value) and the measured values a day or more later; days within this window are then corrected in the statistics. More days make the answers larger, not the requests more frequent. The first import covers at least these days, even without history. At least 2 days: a day is published on the following day, and that day's first update can run before the publication.",
+          "history": "How far back the first import of a metering point reaches. It reads three months per request and metering point, two requests for a time outside an energy community: one year takes up to 10 requests per metering point, three years up to 26, on top of the updates. The API refuses requests when too many arrive; a refused read is tried again with a later update. Only used while a metering point has no statistics yet, that is at setup or for a metering point added later; changing it imports nothing for the others.",
+          "scan_interval": "The time between two updates, in minutes (at least 60). Salzburg Netz publishes each day once, between 10:00 and 12:00, and a period is read only once per day, so a shorter interval does not fetch values sooner."
+        }
+      }
+    },
+    "error": {
+      "invalid_metering_points": "Enter 33-character metering points (AT…) or 10-digit facility numbers (003…), separated by commas.",
+      "no_metering_points": "Choose at least one metering point."
+    }
+  },
+  "selector": {
+    "history": {
+      "options": {
+        "none": "None: only the days read again",
+        "month": "One month",
+        "year": "One year",
+        "maximum": "Three years, the most the API hands out"
       }
     }
   }

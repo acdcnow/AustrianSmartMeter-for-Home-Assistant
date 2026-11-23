@@ -21,14 +21,30 @@
           "country_code": "Codice paese (es. at)",
           "postcode": "Codice postale",
           "gpnr": "Numero cliente (GPNR, 8 cifre)",
-          "metering_points": "Punti di misura (ZP), opzionale - separati da virgole",
           "username": "Nome utente (Email)",
           "password": "Password"
+        },
+        "data_description": {
+          "gpnr": "Il numero cliente per cui è stata creata la chiave API, come mostrato nel portale dei servizi."
         }
       },
       "qualification": {
         "title": "Selectra: determinare la tariffa",
         "description": "Selectra identifica la tariffa tramite un questionario e ogni risposta costa una chiamata della quota mensile. Le domande di tipo `json` richiedono un documento JSON.\n\n{question_list}"
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz: impostazioni",
+        "description": "Spuntare i punti di misura da leggere. Ognuno mostra ciò che Salzburg Netz indica al riguardo, con le sue parole e se noto: l'energia (Strom, Gas), il tipo di impianto, il prodotto e l'indirizzo, e tra parentesi i numeri dei contatori. Un punto di misura i cui contratti sono tutti terminati, per esempio a un indirizzo precedente, compare in fondo con il periodo del contratto e non è spuntato.\n\nLe impostazioni qui sotto decidono cosa viene letto e cosa la prima importazione scrive nelle statistiche a lungo termine, usate dalla dashboard Energia. Tutto si può modificare in seguito nelle opzioni dell'integrazione.",
+        "data": {
+          "metering_points": "Punti di misura",
+          "reread_days": "Giorni riletti a ogni aggiornamento",
+          "history": "Storico della prima importazione"
+        },
+        "data_description": {
+          "metering_points": "Vengono letti solo i punti di misura spuntati. Uno che Salzburg Netz aggiunge in seguito al proprio numero cliente viene letto non appena lo si spunta nelle opzioni. Se Salzburg Netz non ne indica nessuno o non risponde, inserirli a mano, separati da virgole: punti di misura di 33 caratteri (AT…) o numeri di impianto di 10 cifre (003…).",
+          "reread_days": "Ogni aggiornamento legge il profilo di carico da altrettanti giorni fa fino a oggi, con una richiesta per punto di misura e giorno, due per un punto di misura fuori da una comunità energetica. A volte Salzburg Netz fornisce un giorno prima come valori provvisori (0, contrassegnati come valori sostitutivi) e i valori misurati un giorno o più dopo; i giorni all'interno di questo periodo vengono allora corretti nelle statistiche. Più giorni rendono le risposte più grandi, non le richieste più frequenti. La prima importazione copre almeno questi giorni, anche senza storico. Almeno 2 giorni: un giorno viene pubblicato il giorno successivo, e il primo aggiornamento di quel giorno può avvenire prima della pubblicazione.",
+          "history": "Fin dove risale la prima importazione di un punto di misura. Legge tre mesi per richiesta e punto di misura, due richieste per un periodo fuori da una comunità energetica: un anno richiede fino a 10 richieste per punto di misura, tre anni fino a 26, in aggiunta agli aggiornamenti. L'API rifiuta le richieste quando ne arrivano troppe; una lettura rifiutata viene ripetuta con un aggiornamento successivo. Usato solo finché un punto di misura non ha ancora statistiche, cioè alla configurazione o per un punto di misura aggiunto in seguito; modificarlo non importa nulla per gli altri."
+        }
       }
     },
     "error": {
@@ -36,7 +52,11 @@
       "invalid_auth": "Autenticazione fallita. Controlla le tue credenziali.",
       "invalid_input": "Il valore non è valido.",
       "no_contracts": "Nessun punto di misurazione trovato in questo account.",
-      "unknown": "Errore imprevisto."
+      "unknown": "Errore imprevisto.",
+      "invalid_metering_points": "Inserire punti di misura di 33 caratteri (AT…) o numeri di impianto di 10 cifre (003…), separati da virgole.",
+      "no_metering_points": "Scegliere almeno un punto di misura.",
+      "metering_points_not_listed": "Salzburg Netz non ha risposto alla richiesta dei punti di misura (il motivo è nel registro), quindi la chiave API non è ancora verificata. Inserire i punti di misura a mano, oppure chiudere questa finestra e riprovare più tardi.",
+      "customer_number_refused": "Salzburg Netz ha rifiutato la richiesta per questo numero cliente (il motivo è nel registro). Verificare il numero cliente e che la chiave API sia stata creata per esso."
     },
     "abort": {
       "already_configured": "Questo account è già configurato."
@@ -48,7 +68,40 @@
         "title": "Opzioni",
         "data": {
           "scan_interval": "Intervallo di aggiornamento (minuti)"
+        },
+        "data_description": {
+          "scan_interval": "Il tempo tra due aggiornamenti, in minuti (almeno 60)."
         }
+      },
+      "salzburgnetz": {
+        "title": "Salzburg Netz: opzioni",
+        "description": "Ogni punto di misura mostra ciò che Salzburg Netz ha indicato al riguardo all'ultimo accesso, se noto: l'energia (Strom, Gas), il tipo di impianto, il prodotto e l'indirizzo, e tra parentesi i numeri dei contatori. Uno i cui contratti sono tutti terminati compare in fondo, con il periodo del contratto.\n\nIl salvataggio ricarica l'integrazione, che poi rilegge ogni punto di misura spuntato ancora una volta.",
+        "data": {
+          "metering_points": "Punti di misura",
+          "reread_days": "Giorni riletti a ogni aggiornamento",
+          "history": "Storico della prima importazione",
+          "scan_interval": "Intervallo di aggiornamento (minuti)"
+        },
+        "data_description": {
+          "metering_points": "Vengono letti solo i punti di misura spuntati. Uno spuntato viene importato secondo lo storico impostato; uno non spuntato non viene più letto, le sue statistiche restano e il suo dispositivo può poi essere eliminato nella pagina del dispositivo. Se l'integrazione non è caricata, inserirli a mano, separati da virgole: punti di misura di 33 caratteri (AT…) o numeri di impianto di 10 cifre (003…).",
+          "reread_days": "Ogni aggiornamento legge il profilo di carico da altrettanti giorni fa fino a oggi, con una richiesta per punto di misura e giorno, due per un punto di misura fuori da una comunità energetica. A volte Salzburg Netz fornisce un giorno prima come valori provvisori (0, contrassegnati come valori sostitutivi) e i valori misurati un giorno o più dopo; i giorni all'interno di questo periodo vengono allora corretti nelle statistiche. Più giorni rendono le risposte più grandi, non le richieste più frequenti. La prima importazione copre almeno questi giorni, anche senza storico. Almeno 2 giorni: un giorno viene pubblicato il giorno successivo, e il primo aggiornamento di quel giorno può avvenire prima della pubblicazione.",
+          "history": "Fin dove risale la prima importazione di un punto di misura. Legge tre mesi per richiesta e punto di misura, due richieste per un periodo fuori da una comunità energetica: un anno richiede fino a 10 richieste per punto di misura, tre anni fino a 26, in aggiunta agli aggiornamenti. L'API rifiuta le richieste quando ne arrivano troppe; una lettura rifiutata viene ripetuta con un aggiornamento successivo. Usato solo finché un punto di misura non ha ancora statistiche, cioè alla configurazione o per un punto di misura aggiunto in seguito; modificarlo non importa nulla per gli altri.",
+          "scan_interval": "Il tempo tra due aggiornamenti, in minuti (almeno 60). Salzburg Netz pubblica ogni giorno una volta, tra le 10:00 e le 12:00, e un periodo viene letto solo una volta al giorno, quindi un intervallo più breve non ottiene i valori prima."
+        }
+      }
+    },
+    "error": {
+      "invalid_metering_points": "Inserire punti di misura di 33 caratteri (AT…) o numeri di impianto di 10 cifre (003…), separati da virgole.",
+      "no_metering_points": "Scegliere almeno un punto di misura."
+    }
+  },
+  "selector": {
+    "history": {
+      "options": {
+        "none": "Nessuno: solo i giorni riletti",
+        "month": "Un mese",
+        "year": "Un anno",
+        "maximum": "Tre anni, il massimo fornito dall'API"
       }
     }
   }

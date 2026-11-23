@@ -4,7 +4,9 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntry
 
+from .const import DOMAIN
 from .coordinator import AustriaSmartMeterCoordinator
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -35,6 +37,22 @@ async def async_unload_entry(
 ) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    entry: ConfigEntry[AustriaSmartMeterCoordinator],
+    device: DeviceEntry,
+) -> bool:
+    """Allow deleting the device of a metering point that is no longer read.
+
+    An entry that is not loaded reads nothing, so each of its devices can go.
+    """
+    data = getattr(getattr(entry, "runtime_data", None), "data", None) or {}
+    return not any(
+        domain == DOMAIN and identifier in data
+        for domain, identifier in device.identifiers
+    )
 
 
 async def _async_update_listener(

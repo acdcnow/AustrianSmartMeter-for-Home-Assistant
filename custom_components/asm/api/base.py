@@ -6,6 +6,10 @@ from typing import Any, List, Dict
 class SmartmeterClient(ABC):
     """Abstract base class for all Smartmeter providers."""
 
+    # How many calendar months the statistics import reads with one call of
+    # historical_data.
+    history_months_per_read = 1
+
     def __init__(self, username, password):
         self.username = username
         self.password = password
