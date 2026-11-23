@@ -95,6 +95,7 @@ def get_client(
             data.get(CONF_PORT),
             data.get(CONF_DSMR_VERSION),
             data.get(CONF_ENCRYPTION_KEY),
+            baudrate=data.get(CONF_BAUDRATE),
         )
 
     # Default to Wiener Netze

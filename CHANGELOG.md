@@ -6,6 +6,66 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 The current line requires **Home Assistant 2026.9** or newer.
 
+## [1.3.0] - 2026-11-24
+
+### ✨ Added
+
+* **A scan interval in seconds for the providers whose meter pushes its values.**
+  energyLIVE and the DSMR customer interface are now polled in **seconds** (options form:
+  *Update Interval (seconds)*, minimum 10); the portals keep minutes with a 60-minute
+  floor. A stored interval is never reinterpreted in the other unit: an entry that had
+  minutes keeps the interval it had (6 hours by default) until it is changed in the
+  options.
+* **HTTP 429 handling.** A provider that refuses a poll because too many requests arrived
+  is left alone for the pause its `Retry-After` names - 15 minutes when the answer names
+  none, at most 6 hours. The next successful poll returns to the configured interval.
+
+### 🛠 Changed
+
+* **An energyLIVE poll costs one request per metering device.** The device list, the
+  device details and the measurement keys are cached for six hours instead of being
+  re-read on every poll (three requests per device), and a device that reports no energy
+  or power register - the gateway that only forwards the interface's data - is not asked
+  for readings at all. A 404 on a reading drops the cache, so a re-paired device is found
+  again with the next poll.
+
+### 🔧 Fixed
+
+* **The DSMR / P1 port is opened at the meter's own baud rate and framing.** Every port
+  was opened at serialx's default of 9600 8N1, so the Austrian Sagemcom T210-D-R (115200
+  8N1) never answered and its setup failed with *No DSMR telegram from /dev/ttyUSB1 within
+  30 seconds*. The settings now follow the DSMR version and mirror dsmr-parser's own
+  `SERIAL_SETTINGS`: 115200 8N1 for DSMR 5 and every later dialect (including Q3D and the
+  T210-D-R), 115200 7E1 for DSMR 4/4+, 9600 7E1 for DSMR 2.2. A new **Baud rate** field
+  of the DSMR setup keeps *Automatic* by default and lets a converter or an unusual meter
+  override the speed.
+* **A local interface no longer fails with "check your internet connection".** A DSMR
+  setup that cannot reach its port shows a hint about the port, the cable and the baud
+  rate, and the *no telegram* message itself names the baud rate that was tried.
+* **A throttled energyLIVE answer no longer looks like a revoked API key.** A 403 that
+  names a pause (`Retry-After`) or reports `X-RateLimit-Remaining: 0` is treated as a
+  rate limit, so it does not start a reauthorisation flow.
+* **Stadtwerke Amstetten has its own flow module.** The provider added in #14 was missing
+  `flows/stadtwerke_amstetten.py`, which `test_every_provider_has_its_flow` asserts (the
+  generic portal login worked through the fallback); it now follows the same pattern as
+  E-Werk Gösting.
+
+## [1.2.2] - 2026-10-23
+
+### ✨ Added
+
+* **Salzburg Netz imports its load profile into the long-term statistics.** The 15-minute
+  values are summed per hour and written with their real timestamps, so a day that the
+  operator publishes late (once a day, between 10:00 and 12:00) appears in the Energy
+  dashboard at the right time instead of at poll time. The first import covers one year of
+  history, three months per request and metering point.
+
+### 🔧 Fixed
+
+* **Salzburg Netz waits after HTTP 429.** A refused request pauses its category for six
+  hours - ending just before the next scheduled poll - instead of being repeated, and a
+  short `Retry-After` is waited out before the request is sent again.
+
 ## [1.2.1] - 2026-10-10
 
 ### 🔧 Fixed

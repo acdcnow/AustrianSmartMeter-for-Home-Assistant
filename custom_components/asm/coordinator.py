@@ -13,22 +13,25 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api.client import get_client
-from .api.errors import SmartmeterError, SmartmeterLoginError
-from .const import (
-    CONF_PROVIDER,
-    CONF_SCAN_INTERVAL,
-    DEFAULT_SCAN_INTERVAL,
-    DOMAIN,
-    LOGGER,
-    MIN_SCAN_INTERVAL,
-    PROVIDER_WIENER_NETZE,
+from .api.errors import (
+    SmartmeterError,
+    SmartmeterLoginError,
+    SmartmeterRateLimitError,
 )
+from .const import CONF_PROVIDER, DOMAIN, LOGGER, PROVIDER_WIENER_NETZE
+from .interval import scan_interval_seconds
 from .statistics import StatisticsImporter, statistic_readings
 
 # Readings can hold values back until a moment (``settles_at``; E-Werk Gösting:
 # 12:00 of the day after theirs). One refresh this long after the earliest such
 # moment fetches them, whatever the scan interval.
 SETTLE_REFRESH_DELAY = timedelta(minutes=5)
+
+# A provider that refuses a poll because too many arrived is left alone: the
+# next poll waits Retry-After, or this long when the answer names no moment. A
+# long pause is cut off, so an absurd Retry-After does not silence the entry.
+RATE_LIMIT_PAUSE = timedelta(minutes=15)
+MAX_RATE_LIMIT_PAUSE = timedelta(hours=6)
 
 
 def _utcnow() -> datetime:
@@ -64,8 +67,10 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Passed explicitly: the entry's unload calls async_shutdown.
             config_entry=entry,
             name=DOMAIN,
-            update_interval=timedelta(minutes=_scan_interval(entry)),
+            update_interval=timedelta(seconds=scan_interval_seconds(entry)),
         )
+        # The configured interval, which a rate-limit pause temporarily raises.
+        self._base_interval = self.update_interval
 
     async def async_shutdown(self) -> None:
         """Cancel any scheduled call, ignore new runs, and start no import."""
@@ -78,6 +83,9 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with self._client_lock:
                 data = await self._async_read_portal()
+        except SmartmeterRateLimitError as err:
+            self._async_pause_after_rate_limit(err)
+            raise UpdateFailed(f"Too many requests: {err}") from err
         except SmartmeterLoginError as err:
             raise ConfigEntryAuthFailed from err
         except SmartmeterError as err:
@@ -86,9 +94,36 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             LOGGER.exception("Unexpected error during update")
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
+        self._async_resume_scan_interval()
         self._async_start_statistics_import(data)
         self._async_schedule_settle_refresh(data)
         return data
+
+    def _async_pause_after_rate_limit(self, err: SmartmeterRateLimitError) -> None:
+        """Poll again only after the pause the API asked for."""
+        pause = (
+            timedelta(seconds=err.retry_after)
+            if err.retry_after is not None
+            else RATE_LIMIT_PAUSE
+        )
+        pause = min(max(pause, self._base_interval), MAX_RATE_LIMIT_PAUSE)
+        if pause > self.update_interval:
+            LOGGER.warning(
+                "%s refused a poll because too many requests arrived; the next "
+                "poll waits %s",
+                self.provider,
+                pause,
+            )
+            self.update_interval = pause
+
+    def _async_resume_scan_interval(self) -> None:
+        """Return to the configured interval after a rate-limit pause."""
+        if self.update_interval != self._base_interval:
+            LOGGER.info(
+                "%s accepted a poll again; back to the configured scan interval",
+                self.provider,
+            )
+            self.update_interval = self._base_interval
 
     async def _async_read_portal(self) -> dict[str, Any]:
         """Read the metering points with their statistics and readings."""
@@ -226,16 +261,6 @@ class AustriaSmartMeterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         LOGGER.warning("Unexpected consumption statistics payload: %s", type(stats))
         return []
-
-
-def _scan_interval(entry: ConfigEntry) -> int:
-    """Return the configured scan interval in minutes."""
-    raw = entry.options.get(CONF_SCAN_INTERVAL) or entry.data.get(CONF_SCAN_INTERVAL)
-    try:
-        interval = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_SCAN_INTERVAL
-    return max(interval, MIN_SCAN_INTERVAL)
 
 
 def _earliest_settling(data: dict[str, Any], now: datetime) -> datetime | None:

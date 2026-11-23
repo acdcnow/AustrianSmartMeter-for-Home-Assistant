@@ -16,6 +16,7 @@
           "port": "Port (e.g. /dev/ttyUSB0 or socket://host:23)",
           "dsmr_version": "DSMR version",
           "encryption_key": "Decryption key (encrypted meters only)",
+          "baudrate": "Baud rate (P1 port)",
           "market_area": "Market area",
           "token": "Selectra API token (bearer)",
           "country_code": "Country code (e.g. at)",
@@ -25,7 +26,8 @@
           "password": "Password"
         },
         "data_description": {
-          "gpnr": "The customer number the API key was created for, as shown in the service portal."
+          "gpnr": "The customer number the API key was created for, as shown in the service portal.",
+          "baudrate": "The speed of the P1 interface. *Automatic* uses the rate of the chosen DSMR version: 115200 baud from DSMR 4 on (including Q3D and the Sagemcom T210-D-R), 9600 baud for DSMR 2.2. A `socket://` reader ignores it; change it only if your meter's port differs."
         }
       },
       "qualification": {
@@ -49,6 +51,7 @@
     },
     "error": {
       "cannot_connect": "Connection failed. Please check your internet connection.",
+      "cannot_connect_local": "No connection. This provider reads a local interface: check the port (for example `/dev/ttyUSB1`), the cable and the baud rate. The log names the reason.",
       "invalid_auth": "Authentication failed. Please check your credentials.",
       "invalid_input": "The value is invalid.",
       "no_contracts": "No metering points (contracts) found in this account.",
@@ -67,10 +70,12 @@
       "init": {
         "title": "Austria Smartmeter Options",
         "data": {
-          "scan_interval": "Update Interval (minutes)"
+          "scan_interval": "Update Interval (minutes)",
+          "scan_interval_seconds": "Update Interval (seconds)"
         },
         "data_description": {
-          "scan_interval": "The time between two updates, in minutes (at least 60)."
+          "scan_interval": "The time between two updates, in minutes (at least 60).",
+          "scan_interval_seconds": "The time between two updates, in seconds (at least 10). energyLIVE and the DSMR customer interface read the meter on every update; the portals publish at most once a day."
         }
       },
       "salzburgnetz": {

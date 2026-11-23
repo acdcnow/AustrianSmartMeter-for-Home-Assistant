@@ -90,7 +90,7 @@ class AustriaSmartMeterConfigFlow(*CONFIG_FLOW_MIXINS, ConfigFlow, domain=DOMAIN
             errors["base"] = "invalid_auth"
         except SmartmeterError as err:
             LOGGER.warning("Config flow: could not query %s: %s", flow.provider, err)
-            errors["base"] = "cannot_connect"
+            errors["base"] = flow.connection_error
         except Exception:  # noqa: BLE001
             LOGGER.exception("Config flow: unexpected error during login")
             errors["base"] = "unknown"

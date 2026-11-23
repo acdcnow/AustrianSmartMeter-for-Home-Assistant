@@ -31,11 +31,24 @@ Two consequences for this adapter:
   last. ``date_from``/``date_until`` are accepted for interface compatibility
   and ignored. Device health values and the reactive energy registers are not
   exposed — the sensor platform cannot express their units.
+
+The device list, the device details and the measurement keys are cached for
+``DEVICES_MAX_AGE``: they only change when a device is paired or removed, so
+re-reading them would cost two requests per device on every poll. A poll
+consequently costs one request per metering device (the gateway that only
+forwards the interface's data sends no register and is not read at all), and an
+answer that contradicts the cache - a 404 - drops it.
+
+No rate limit is documented, and the unauthenticated answer carries no
+rate-limit header to read one from, so the adapter treats 429 as a refusal and
+names the pause it asks for in ``Retry-After``; the coordinator waits it out
+before the next poll (see its ``RATE_LIMIT_PAUSE``).
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -45,7 +58,9 @@ from .base import SmartmeterClient
 from .errors import (
     SmartmeterConnectionError,
     SmartmeterLoginError,
+    SmartmeterNotFoundError,
     SmartmeterQueryError,
+    SmartmeterRateLimitError,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -58,6 +73,11 @@ REQUEST_TIMEOUT = 30
 # The key is sent with every request and never expires on its own, but it can be
 # revoked in the customer portal. Re-checking it once a day surfaces that early.
 SESSION_MAX_AGE = timedelta(hours=24)
+
+# How long the device list, its details and its measurement keys are reused.
+# They only change when a device is paired or removed; a 404 on a reading drops
+# them sooner (see historical_data).
+DEVICES_MAX_AGE = timedelta(hours=6)
 
 # The API reports energy in Wh and power in W already, so nothing is converted.
 UNIT_WH = "Wh"
@@ -121,6 +141,33 @@ def _timestamp_to_iso(value: Any) -> str | None:
         return None
 
 
+def _retry_after(response: requests.Response) -> float | None:
+    """Return the pause an answer asks for, in seconds, if it names one."""
+    value = (response.headers.get("Retry-After") or "").strip()
+    if not value:
+        return None
+    try:
+        return max(float(value), 0.0)
+    except ValueError:
+        pass
+    try:
+        moment = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return max((moment - datetime.now(timezone.utc)).total_seconds(), 0.0)
+
+
+def _looks_throttled(response: requests.Response) -> bool:
+    """Return True when a 403 refuses more requests instead of the key."""
+    return bool(response.headers.get("Retry-After")) or (
+        response.headers.get("X-RateLimit-Remaining") or ""
+    ).strip() == "0"
+
+
 def _facility_type(measurements: list[str]) -> str:
     """Return a display type for a device, based on the values it reports."""
     if any(code in measurements for code in _CONSUMPTION_CODES):
@@ -171,6 +218,12 @@ class EnergyliveClient(SmartmeterClient):
             }
         )
         self._login_time: datetime | None = None
+        # The device list, its details and its measurement keys (see
+        # zaehlpunkte). ``_measurements`` maps a device id to the measurement
+        # keys it reports, so a device without a register is not asked for one.
+        self._devices: list[dict[str, Any]] | None = None
+        self._devices_at: datetime | None = None
+        self._measurements: dict[str, tuple[str, ...]] = {}
 
     # -------------------------------------------------------------- session
 
@@ -189,6 +242,20 @@ class EnergyliveClient(SmartmeterClient):
         if not self.is_logged_in():
             self.login()
 
+    def _devices_stale(self) -> bool:
+        """Return True when the cached device list is old enough to re-read."""
+        if self._devices_at is None:
+            return True
+        return datetime.now() - self._devices_at >= DEVICES_MAX_AGE
+
+    def _forget_devices(self) -> None:
+        """Drop the cached device list after an answer that contradicts it."""
+        if self._devices is not None:
+            LOGGER.debug("energyLIVE: dropping the cached device list")
+        self._devices = None
+        self._devices_at = None
+        self._measurements.clear()
+
     # ----------------------------------------------------------------- http
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -202,6 +269,19 @@ class EnergyliveClient(SmartmeterClient):
         """GET a URL and return its JSON body."""
         response = self._request("GET", url, **kwargs)
 
+        # A refusal to serve more requests is reported with the pause it asks
+        # for; the coordinator waits it out. A 403 is a refusal too when it
+        # names a pause, although the API normally uses 403 for the key alone.
+        if response.status_code == 429 or (
+            response.status_code == 403 and _looks_throttled(response)
+        ):
+            pause = _retry_after(response)
+            raise SmartmeterRateLimitError(
+                f"{url} refused the request because too many requests arrived"
+                + (f"; retry after {pause:g}s" if pause is not None else "")
+                + ".",
+                pause,
+            )
         if response.status_code in (401, 403):
             # The API answers 403 for an unknown or revoked key on every
             # endpoint, so this is always a credentials problem.
@@ -210,7 +290,9 @@ class EnergyliveClient(SmartmeterClient):
                 "smartENERGY app or customer portal."
             )
         if response.status_code == 404:
-            raise SmartmeterQueryError(f"{url} returned HTTP 404 (unknown device?).")
+            raise SmartmeterNotFoundError(
+                f"{url} returned HTTP 404 (unknown device?)."
+            )
         if response.status_code != 200:
             raise SmartmeterConnectionError(
                 f"{url} returned HTTP {response.status_code}."
@@ -251,8 +333,20 @@ class EnergyliveClient(SmartmeterClient):
     # ------------------------------------------------------------- devices
 
     def zaehlpunkte(self) -> list[dict[str, Any]]:
-        """Return the energyLIVE devices of this API key."""
+        """Return the energyLIVE devices of this API key.
+
+        The list, the details and the measurement keys are cached for
+        DEVICES_MAX_AGE: they only change when a device is paired or removed,
+        and re-reading them would add two requests per device to every poll.
+        """
         self._ensure_session()
+        if self._devices is not None and not self._devices_stale():
+            LOGGER.debug(
+                "energyLIVE: reusing the device list read at %s",
+                self._devices_at.isoformat() if self._devices_at else "?",
+            )
+            return self._devices
+
         devices = self._get_json(f"{BASE_URL}/devices")
         if not isinstance(devices, list):
             raise SmartmeterQueryError(f"Unexpected device list: {devices!r}")
@@ -296,7 +390,12 @@ class EnergyliveClient(SmartmeterClient):
                 "No energyLIVE devices found for this API key. Check that the "
                 "key belongs to the account with the paired interface."
             )
-        return [{"zaehlpunkte": meters}]
+        self._devices = [{"zaehlpunkte": meters}]
+        self._devices_at = datetime.now()
+        self._measurements = {
+            info["zaehlpunktnummer"]: tuple(info["measurements"]) for info in meters
+        }
+        return self._devices
 
     # ------------------------------------------------------------- readings
 
@@ -309,13 +408,28 @@ class EnergyliveClient(SmartmeterClient):
         every poll reports the newest value of each register. A device without
         any of the supported registers (a bare gateway, a device that is not
         paired yet) returns an empty list, which leaves its entities unknown
-        instead of faking a zero.
+        instead of faking a zero; its measurement keys are known from
+        ``zaehlpunkte``, so it is not asked at all.
         """
         self._ensure_session()
+        keys = self._measurements.get(zaehlpunktnummer)
+        if keys is not None and not set(keys) & set(_REGISTERS):
+            LOGGER.debug(
+                "energyLIVE: %s reports no energy or power register; not read",
+                zaehlpunktnummer,
+            )
+            return []
+
         url = (
             f"{BASE_URL}/devices/{quote(str(zaehlpunktnummer))}/measurements/latest"
         )
-        payload = self._get_json(url)
+        try:
+            payload = self._get_json(url)
+        except SmartmeterNotFoundError:
+            # The device the cached list names is gone: pair it again or accept
+            # that this poll reports no readings, and list the devices anew.
+            self._forget_devices()
+            raise
         if not isinstance(payload, list):
             raise SmartmeterQueryError(f"Unexpected measurement payload: {payload!r}")
 

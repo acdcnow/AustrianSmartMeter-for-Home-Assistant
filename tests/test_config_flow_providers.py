@@ -8,7 +8,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.asm.api.errors import SmartmeterError, SmartmeterLoginError
+from custom_components.asm.api.errors import (
+    SmartmeterConnectionError,
+    SmartmeterError,
+    SmartmeterLoginError,
+)
 from custom_components.asm.const import DOMAIN
 
 CONTRACTS = [{"zaehlpunkte": [{"zaehlpunktnummer": "AT0040000000000000000000000000001"}]}]
@@ -27,12 +31,16 @@ CASES = [
      "Netz Niederösterreich (EVN) (me)", {"username": "me", "password": "pw"}, "netz_noe_me"),
     ("ewerk_goesting", {"username": None, "password": None}, {"username": "me", "password": "pw"},
      "E-Werk Gösting (me)", {"username": "me", "password": "pw"}, "ewerk_goesting_me"),
+    ("stadtwerke_amstetten", {"username": None, "password": None}, {"username": "me", "password": "pw"},
+     "Stadtwerke Amstetten (me)", {"username": "me", "password": "pw"}, "stadtwerke_amstetten_me"),
     ("energylive", {"api_key": None}, {"api_key": " secretkey1234 "},
      "energyLIVE (smartENERGY) (…1234)", {"api_key": "secretkey1234"}, _hashed("energylive", "secretkey1234")),
     ("energiedaten_at", {"api_key": None}, {"api_key": "abcdefgh"},
      "energiedaten.at (API key) (…efgh)", {"api_key": "abcdefgh"}, _hashed("energiedaten_at", "abcdefgh")),
-    ("dsmr", {"port": None, "dsmr_version": "5", "encryption_key": ""}, {"port": " socket://meter:23 ", "dsmr_version": "5", "encryption_key": " key "},
-     "DSMR / P1 meter (local) (socket://meter:23)", {"port": "socket://meter:23", "dsmr_version": "5", "encryption_key": "key"},
+    ("dsmr", {"port": None, "dsmr_version": "5", "encryption_key": "", "baudrate": "auto"},
+     {"port": " socket://meter:23 ", "dsmr_version": "5", "encryption_key": " key ", "baudrate": "115200"},
+     "DSMR / P1 meter (local) (socket://meter:23)",
+     {"port": "socket://meter:23", "dsmr_version": "5", "encryption_key": "key", "baudrate": "115200"},
      _hashed("dsmr", "socket://meter:23")),
     ("awattar", {"market_area": "AT"}, {"market_area": "DE"},
      "aWATTar market prices (Germany)", {"market_area": "DE"}, "awattar_de"),
@@ -134,6 +142,27 @@ async def test_selectra_rejects_a_bad_country(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"token": "tok", "country_code": "aut", "postcode": ""})
     assert result["step_id"] == "credentials"
     assert result["errors"] == {"country_code": "invalid_input"}
+
+
+async def test_a_silent_serial_port_is_not_blamed_on_the_internet(hass: HomeAssistant) -> None:
+    """A DSMR port that stays silent shows the local hint, not the internet one."""
+    result = await _credentials(hass, "dsmr")
+    client = _client()
+    client.login.side_effect = SmartmeterConnectionError(
+        "No DSMR telegram from /dev/ttyUSB1 within 30 seconds at 115200 baud."
+    )
+    with patch("custom_components.asm.flows.base.get_client", return_value=client):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "port": "/dev/ttyUSB1",
+                "dsmr_version": "SAGEMCOM_T210_D_R",
+                "encryption_key": "",
+                "baudrate": "auto",
+            },
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect_local"}
 
 
 async def test_options_scan_interval(hass: HomeAssistant) -> None:

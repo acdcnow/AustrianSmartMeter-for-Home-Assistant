@@ -4,7 +4,7 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-blue)](https://www.home-assistant.io/)
-[![Version](https://img.shields.io/badge/version-1.2.1-green)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/releases)
+[![Version](https://img.shields.io/badge/version-1.3.0-green)](https://github.com/acdcnow/AustrianSmartMeter-for-Home-Assistant/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Maintainer](https://img.shields.io/badge/maintainer-acdcnow-blue)](https://github.com/acdcnow)
 
@@ -63,7 +63,11 @@ is neither a grid operator nor a portal login:
 The devices report genuine cumulative meter readings — consumption (`1.8.0`) and feed-in
 (`2.8.0`) in Wh — which is exactly what the integration's total-increasing sensors expect,
 plus the current power in W. The API has no history and no daily statistics, and the
-values are only as fresh as the configured scan interval (see *Options* below).
+values are only as fresh as the configured scan interval (see *Options* below): unlike the
+portals, energyLIVE is polled in **seconds** (minimum 10). A poll costs one request per
+metering device, because the device list and its measurement keys are cached for six
+hours; a gateway that only forwards the interface's data is not read at all. A refused
+request (HTTP 429) is waited out for the pause the answer names in `Retry-After`.
 
 ### energiedaten.at (API platform)
 
@@ -108,14 +112,24 @@ connection to it:
    `socket://<host>:<port>` for a P1 reader on your network.
 3. Pick the **DSMR version** (the Austrian *Sagemcom T210-D-R* is listed by name) and, for
    an encrypted meter, paste the **decryption key** your grid operator provided.
+4. Leave the **baud rate** on *Automatic*: it follows the DSMR version - 115200 baud from
+   DSMR 4 on (including Q3D and the Sagemcom T210-D-R), 9600 for DSMR 2.2 - together with
+   the framing (8N1 from DSMR 5 on, 7E1 for 2.2 and 4). Only a converter or an unusual
+   meter needs another value; a `socket://` reader ignores it.
 
 The integration reads one telegram per scan interval and reports the cumulative registers
 (`1.8.0` consumption / `2.8.0` feed-in in Wh) plus the current power (`1.7.0`/`2.7.0` in W).
 Gas and water values that a telegram carries over M-Bus are not exposed.
 
 > **Note:** Home Assistant's own [DSMR integration](https://www.home-assistant.io/integrations/dsmr)
-> reads the very same interface with push updates (every 10 seconds). Use it if you want
-> real-time data; this integration polls, with a minimum interval of 60 minutes.
+> reads the very same interface with push updates (every 10 seconds). This integration
+> polls it instead, and its scan interval is set in **seconds** (minimum 10), so `10`
+> follows the telegram rate; a longer interval is enough when only the statistics matter.
+> Do not run both integrations against the same port: only one can open it.
+>
+> A port that stays silent is reported as a local problem: the setup and the log name the
+> port and the baud rate that was tried, and the log says when no telegram arrived within
+> 30 seconds.
 
 ### aWATTar market prices
 
@@ -440,6 +454,13 @@ Energy dashboard work identically to E-Werk Gösting described above.
 * **Reads that survive a late portal:** a provider that publishes its data a day late is
   read over a window, so its sensors report the newest day that exists instead of staying
   empty until the portal catches up.
+* **Per-provider scan interval:** seconds for energyLIVE and the DSMR interface (minimum
+  10, so the poll can follow the meter's own update rate), minutes for the portals
+  (minimum 60). An API that answers HTTP 429 pauses the entry for as long as its
+  `Retry-After` asks, and the next good poll returns to the configured interval.
+* **The DSMR port is read the way the meter speaks:** baud rate and framing follow the
+  DSMR version (115200 8N1 for DSMR 5, Q3D and the Sagemcom T210-D-R, 115200 7E1 for
+  DSMR 4, 9600 7E1 for DSMR 2.2), with an optional override for a converter.
 * **Statistics:** daily consumption statistics ("Consumption Yesterday", "Consumption Day Before Yesterday") where the portal provides them.
 * **Long-term statistics with real timestamps:** values that a portal publishes a day late (E-Werk Gösting) go into Home Assistant's long-term statistics hour by hour, with their history, for the Energy dashboard.
 * **Diagnostics:** detailed technical information exposed as diagnostic entities:
@@ -511,9 +532,23 @@ Since this is a custom integration, add it as a **custom repository**:
 ### Options
 
 Clicking the "Configure" button on the integration entry allows you to set the
-**scan interval** (default: every 360 minutes / 6 hours, minimum: 60 minutes).
-Since the portals usually only publish new data once a day, frequent polling is
-not necessary.
+**scan interval**. The unit depends on the provider:
+
+* **Portals** (Wiener Netze, Netz Niederösterreich, energiedaten.at, Salzburg Netz,
+  E-Werk Gösting, Stadtwerke Amstetten, Selectra, aWATTar): the interval is given in
+  **minutes**, default 360 (6 hours), minimum 60. The portals publish at most once a day,
+  so frequent polling is not necessary - and several of them ask not to be read more
+  often.
+* **energyLIVE and the DSMR customer interface** poll a meter that pushes its values, so
+  their interval is given in **seconds**: minimum 10, default 360 minutes until you set
+  one. `10` follows the telegram rate of a P1 interface and the update rate of the
+  energyLIVE device; `30` is a gentler choice for a cloud API.
+
+A stored interval is never reinterpreted in the other unit: an entry configured before
+the seconds option existed keeps the interval it had (6 hours by default) until you
+change it. A provider that answers **HTTP 429** is left alone for the pause it asks for
+in `Retry-After` (15 minutes when the answer names none, at most 6 hours); the next good
+poll returns to the configured interval.
 
 ## 📊 Entities & Sensors
 
@@ -601,8 +636,9 @@ endpoint's body is no longer required to be JSON. Please report it if you still 
 ## 🧪 Tests
 
 The tests in `tests/` use Home Assistant's test harness
-(`pytest-homeassistant-custom-component`). They cover the setup of every provider, and
-Salzburg Netz's client, dialogs, texts and entries set up by 1.2.2:
+(`pytest-homeassistant-custom-component`). They cover the setup of every provider, the
+scan interval, the energyLIVE client, the DSMR port settings, and Salzburg Netz's client,
+dialogs, texts and entries set up by 1.2.2:
 
 ```bash
 python3 -m venv .venv
@@ -613,6 +649,29 @@ python3 -m venv .venv
 ## 📝 Changelog
 
 The full history of this integration is in **[CHANGELOG.md](CHANGELOG.md)**.
+
+### 1.3.0
+
+* **A scan interval in seconds for the providers whose meter pushes its values.**
+  energyLIVE and the DSMR customer interface can be polled every 10 seconds or more; the
+  portals keep minutes with a 60-minute floor. A stored interval is never reinterpreted
+  in the other unit, so an upgrade does not start polling an API faster by itself.
+* **The DSMR / P1 port is opened with the meter's own settings.** The baud rate and
+  framing follow the DSMR version and mirror dsmr-parser's own `SERIAL_SETTINGS`:
+  115200 8N1 for DSMR 5 and every later dialect (including Q3D and the Sagemcom
+  T210-D-R), 115200 7E1 for DSMR 4/4+, 9600 7E1 for DSMR 2.2. Every port was opened at
+  serialx's 9600 8N1 default before, which left a 115200 meter silent. A *Baud rate*
+  field of the setup allows an override, and a silent port now reports a local problem
+  instead of "check your internet connection".
+* **An energyLIVE poll costs one request per metering device.** The device list and its
+  measurement keys are cached for six hours, and a gateway that carries no register is
+  not read at all. An HTTP 429 is waited out for the pause its `Retry-After` names.
+
+### 1.2.2
+
+* **Salzburg Netz** imports its 15-minute load profile into the long-term statistics with
+  real timestamps (first import: one year), and pauses requests for six hours after an
+  HTTP 429 instead of repeating them.
 
 ### 1.2.1
 

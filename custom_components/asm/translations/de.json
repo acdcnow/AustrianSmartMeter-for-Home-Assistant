@@ -16,6 +16,7 @@
           "port": "Anschluss (z. B. /dev/ttyUSB0 oder socket://host:23)",
           "dsmr_version": "DSMR-Version",
           "encryption_key": "Entschlüsselungsschlüssel (nur verschlüsselte Zähler)",
+          "baudrate": "Baudrate (P1-Schnittstelle)",
           "market_area": "Marktgebiet",
           "token": "Selectra API-Token (Bearer)",
           "country_code": "Ländercode (z. B. at)",
@@ -25,7 +26,8 @@
           "password": "Passwort"
         },
         "data_description": {
-          "gpnr": "Die Kundennummer, für die der API-Schlüssel erstellt wurde, wie im Serviceportal angezeigt."
+          "gpnr": "Die Kundennummer, für die der API-Schlüssel erstellt wurde, wie im Serviceportal angezeigt.",
+          "baudrate": "Die Geschwindigkeit der P1-Schnittstelle. *Automatic* verwendet die Rate der gewählten DSMR-Version: 115200 baud ab DSMR 4 (auch für Q3D und den Sagemcom T210-D-R), 9600 baud für DSMR 2.2. Ein `socket://`-Leser ignoriert den Wert; ändern Sie ihn nur, wenn der Anschluss Ihres Zählers abweicht."
         }
       },
       "qualification": {
@@ -49,6 +51,7 @@
     },
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen. Bitte prüfen Sie Ihre Internetverbindung.",
+      "cannot_connect_local": "Keine Verbindung. Dieser Anbieter liest eine lokale Schnittstelle: Prüfen Sie Port (z. B. `/dev/ttyUSB1`), Kabel und Baudrate. Den Grund nennt das Protokoll.",
       "invalid_auth": "Anmeldung fehlgeschlagen. Bitte überprüfen Sie Ihre Zugangsdaten.",
       "invalid_input": "Der Wert ist ungültig.",
       "no_contracts": "Keine Zählpunkte in diesem Konto gefunden.",
@@ -67,10 +70,12 @@
       "init": {
         "title": "Einstellungen",
         "data": {
-          "scan_interval": "Aktualisierungsintervall (Minuten)"
+          "scan_interval": "Aktualisierungsintervall (Minuten)",
+          "scan_interval_seconds": "Aktualisierungsintervall (Sekunden)"
         },
         "data_description": {
-          "scan_interval": "Die Zeit zwischen zwei Aktualisierungen in Minuten (mindestens 60)."
+          "scan_interval": "Die Zeit zwischen zwei Aktualisierungen in Minuten (mindestens 60).",
+          "scan_interval_seconds": "Die Zeit zwischen zwei Aktualisierungen in Sekunden (mindestens 10). energyLIVE und die DSMR-Kundenschnittstelle lesen den Zähler bei jeder Aktualisierung; die Portale veröffentlichen höchstens einmal am Tag."
         }
       },
       "salzburgnetz": {

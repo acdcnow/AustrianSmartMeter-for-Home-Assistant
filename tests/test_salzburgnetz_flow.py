@@ -301,7 +301,8 @@ def test_every_setting_is_explained(name: str) -> None:
     assert set(steps[1]["data"]) == {"metering_points", "scan_interval", *SETTINGS}
     credentials = strings["config"]["step"]["credentials"]
     assert "metering_points" not in credentials["data"]
-    assert set(credentials["data_description"]) == {"gpnr"}
+    # gpnr explains a Salzburg Netz field, baudrate a DSMR one.
+    assert set(credentials["data_description"]) == {"gpnr", "baudrate"}
     assert set(strings["selector"]) == {"history"}
     assert set(strings["selector"]["history"]["options"]) == {"none", "month", "year", "maximum"}
     for errors in (strings["config"]["error"], strings["options"]["error"]):

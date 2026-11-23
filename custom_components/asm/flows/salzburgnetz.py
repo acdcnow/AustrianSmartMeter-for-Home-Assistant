@@ -12,7 +12,6 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
@@ -42,11 +41,11 @@ from ..const import (
     CONF_METERING_POINTS,
     CONF_PROVIDER,
     CONF_REREAD_DAYS,
-    CONF_SCAN_INTERVAL,
     LOGGER,
     PROVIDER_SALZBURGNETZ,
 )
-from .base import ProviderFlow, scan_interval
+from ..interval import scan_interval_field
+from .base import ProviderFlow
 
 # What SalzburgNetzFlow.async_check returns when the customer number is refused.
 _REFUSED = object()
@@ -371,9 +370,7 @@ class SalzburgNetzOptionsFlowMixin:
                 {
                     **_metering_points_field(described, selected),
                     **_settings_fields(current),
-                    vol.Optional(
-                        CONF_SCAN_INTERVAL, default=scan_interval(entry)
-                    ): cv.positive_int,
+                    **scan_interval_field(entry),
                 }
             ),
             errors=errors,

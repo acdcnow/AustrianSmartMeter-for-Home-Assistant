@@ -18,6 +18,7 @@ from .salzburgnetz import (
     SalzburgNetzOptionsFlowMixin,
 )
 from .selectra import SelectraConfigFlowMixin, SelectraFlow
+from .stadtwerke_amstetten import StadtwerkeAmstettenFlow
 from .wiener_netze import WienerNetzeFlow
 
 PROVIDER_FLOWS: dict[str, ProviderFlow] = {
@@ -32,6 +33,7 @@ PROVIDER_FLOWS: dict[str, ProviderFlow] = {
         SelectraFlow(),
         SalzburgNetzFlow(),
         EwerkGoestingFlow(),
+        StadtwerkeAmstettenFlow(),
     )
 }
 

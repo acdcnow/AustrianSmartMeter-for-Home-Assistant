@@ -17,45 +17,22 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import (
-    ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
 )
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
 
 from ..api.base import SmartmeterClient
 from ..api.client import get_client
-from ..const import (
-    CONF_API_KEY,
-    CONF_PROVIDER,
-    CONF_SCAN_INTERVAL,
-    DEFAULT_SCAN_INTERVAL,
-    LOGGER,
-    MIN_SCAN_INTERVAL,
-    PROVIDERS,
-)
+from ..const import CONF_API_KEY, CONF_PROVIDER, LOGGER, PROVIDERS
+from ..interval import scan_interval_field
 
 
 def mask(value: str) -> str:
     """Return a loggable hint for a secret, never the secret itself."""
     return f"…{value[-4:]}" if len(value) > 4 else "…"
-
-
-def scan_interval(entry: ConfigEntry) -> int:
-    """Return an entry's scan interval in minutes, for a form's default."""
-    current = (
-        entry.options.get(CONF_SCAN_INTERVAL)
-        or entry.data.get(CONF_SCAN_INTERVAL)
-        or DEFAULT_SCAN_INTERVAL
-    )
-    try:
-        return max(int(current), MIN_SCAN_INTERVAL)
-    except (TypeError, ValueError):
-        LOGGER.warning("Invalid scan interval %s, using the default", current)
-        return DEFAULT_SCAN_INTERVAL
 
 
 class ProviderFlow:
@@ -67,6 +44,11 @@ class ProviderFlow:
     """
 
     provider: str = ""
+
+    # The error shown when the check cannot reach the provider. A provider that
+    # reads a local interface names it differently: "check your internet
+    # connection" is misleading for a serial port.
+    connection_error: str = "cannot_connect"
 
     # Hash the identifier into the unique id instead of using it verbatim: the
     # unique id ends up in the config entry and in logs and must not carry a
@@ -152,13 +134,7 @@ class ProviderFlow:
             return flow.async_create_entry(data=user_input)
         return flow.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_SCAN_INTERVAL, default=scan_interval(flow.config_entry)
-                    ): cv.positive_int
-                }
-            ),
+            data_schema=vol.Schema(scan_interval_field(flow.config_entry)),
         )
 
 

@@ -16,6 +16,7 @@
           "port": "Puerto (p. ej. /dev/ttyUSB0 o socket://host:23)",
           "dsmr_version": "Versión DSMR",
           "encryption_key": "Clave de descifrado (solo contadores cifrados)",
+          "baudrate": "Velocidad en baudios (interfaz P1)",
           "market_area": "Zona de mercado",
           "token": "Token de API de Selectra (Bearer)",
           "country_code": "Código de país (p. ej. at)",
@@ -25,7 +26,8 @@
           "password": "Contraseña"
         },
         "data_description": {
-          "gpnr": "El número de cliente para el que se creó la clave API, tal como aparece en el portal de servicio."
+          "gpnr": "El número de cliente para el que se creó la clave API, tal como aparece en el portal de servicio.",
+          "baudrate": "La velocidad de la interfaz P1. *Automatic* usa la velocidad de la versión DSMR elegida: 115200 baudios desde DSMR 4 (también para Q3D y el Sagemcom T210-D-R), 9600 baudios para DSMR 2.2. Un lector `socket://` lo ignora; cámbielo solo si el puerto de su contador difiere."
         }
       },
       "qualification": {
@@ -49,6 +51,7 @@
     },
     "error": {
       "cannot_connect": "Conexión fallida. Por favor, compruebe su conexión a internet.",
+      "cannot_connect_local": "Sin conexión. Este proveedor lee una interfaz local: compruebe el puerto (por ejemplo `/dev/ttyUSB1`), el cable y la velocidad en baudios. El registro indica el motivo.",
       "invalid_auth": "Autenticación fallida. Por favor, compruebe sus credenciales.",
       "invalid_input": "El valor no es válido.",
       "no_contracts": "No se encontraron puntos de suministro en esta cuenta.",
@@ -67,10 +70,12 @@
       "init": {
         "title": "Opciones",
         "data": {
-          "scan_interval": "Intervalo de actualización (minutos)"
+          "scan_interval": "Intervalo de actualización (minutos)",
+          "scan_interval_seconds": "Intervalo de actualización (segundos)"
         },
         "data_description": {
-          "scan_interval": "El tiempo entre dos actualizaciones, en minutos (al menos 60)."
+          "scan_interval": "El tiempo entre dos actualizaciones, en minutos (al menos 60).",
+          "scan_interval_seconds": "El tiempo entre dos actualizaciones, en segundos (al menos 10). energyLIVE y la interfaz de cliente DSMR leen el contador en cada actualización; los portales publican como máximo una vez al día."
         }
       },
       "salzburgnetz": {

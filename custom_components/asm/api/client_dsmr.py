@@ -31,9 +31,12 @@ Two practical notes:
 
 * DSMR has no history either. Every poll reads the current telegram, so the data
   is only as fresh as the configured scan interval.
-* The integration's minimum scan interval is 60 minutes. The meter pushes every
-  10 seconds, so a lower interval would be realistic - configure it with that in
-  mind.
+* The port is opened with the speed and framing the DSMR version uses (see
+  ``dsmr_versions.SERIAL_SETTINGS``): 115200 8N1 for DSMR 5 and every later
+  dialect including the Austrian Q3D and Sagemcom T210-D-R, 115200 7E1 for DSMR
+  4, 9600 7E1 for DSMR 2.2. serialx would otherwise open 9600 8N1, which leaves
+  a 115200 meter silent. The scan interval of this provider is set in seconds
+  (minimum 10), so it can follow the meter's ten-second telegram rate.
 """
 from __future__ import annotations
 
@@ -50,7 +53,7 @@ from dsmr_parser.parsers import TelegramParser
 from serialx import SerialException, serial_for_url
 
 from .base import SmartmeterClient
-from .dsmr_versions import DEFAULT_DSMR_VERSION, DSMR_VERSIONS
+from .dsmr_versions import DEFAULT_DSMR_VERSION, DSMR_VERSIONS, serial_settings
 from .errors import (
     SmartmeterConnectionError,
     SmartmeterError,
@@ -237,7 +240,7 @@ def _readings_from_telegram(
 
 
 def _metering_point_info(
-    telegram: Any, spec: dict[str, Any], port: str, dsmr_version: str
+    telegram: Any, spec: dict[str, Any], port: str, dsmr_version: str, baudrate: int
 ) -> dict[str, Any]:
     """Describe the meter a telegram came from."""
     names = _specification_names(spec)
@@ -273,6 +276,7 @@ def _metering_point_info(
         "dsmr_version": version_label,
         "dsmr_version_marker": version_marker,
         "port": port,
+        "baudrate": baudrate,
         "encrypted": bool(spec.get("general_global_cipher")),
         "registers": registers,
         "register_count": len(registers),
@@ -289,6 +293,7 @@ class DsmrClient(SmartmeterClient):
         dsmr_version: str | None = None,
         encryption_key: str | None = None,
         password: str | None = None,
+        baudrate: int | str | None = None,
     ):
         # The base class keeps the credential for its subclasses; a DSMR port has
         # no username and the meter's key lives only in `encryption_key`, so it is
@@ -297,6 +302,9 @@ class DsmrClient(SmartmeterClient):
         self.port = (port or "").strip()
         self.dsmr_version = (dsmr_version or DEFAULT_DSMR_VERSION).strip()
         self.encryption_key = (encryption_key or "").strip()
+        # The speed and framing the version sends at; a stored baud rate wins.
+        self.serial_settings = serial_settings(self.dsmr_version, baudrate)
+        self.baudrate: int = self.serial_settings["baudrate"]
         self._login_time: datetime | None = None
         self._telegram: Any | None = None
         self._telegram_read_at: datetime | None = None
@@ -379,16 +387,27 @@ class DsmrClient(SmartmeterClient):
         encrypted = bool(spec.get("general_global_cipher"))
         parser = TelegramParser(spec)
 
+        LOGGER.debug(
+            "DSMR: opening %s at %s baud, %s%s%s (DSMR %s)",
+            self.port,
+            self.serial_settings["baudrate"],
+            self.serial_settings["byte_size"],
+            self.serial_settings["parity"],
+            self.serial_settings["stopbits"],
+            self.dsmr_version,
+        )
         try:
-            handle = serial_for_url(self.port, connect_timeout=CONNECT_TIMEOUT)
+            handle = serial_for_url(
+                self.port, connect_timeout=CONNECT_TIMEOUT, **self.serial_settings
+            )
             handle.open()
         except SerialException as err:
             raise SmartmeterConnectionError(
-                f"Could not open the DSMR port {self.port}: {err}"
+                f"Could not open the DSMR port {self.port} at {self.baudrate} baud: {err}"
             ) from err
         except OSError as err:
             raise SmartmeterConnectionError(
-                f"Could not open the DSMR port {self.port}: {err}"
+                f"Could not open the DSMR port {self.port} at {self.baudrate} baud: {err}"
             ) from err
 
         try:
@@ -419,8 +438,9 @@ class DsmrClient(SmartmeterClient):
                     return telegram
 
             raise SmartmeterConnectionError(
-                f"No DSMR telegram from {self.port} within {READ_TIMEOUT} seconds. "
-                "Check the cable/adapter and the configured DSMR version."
+                f"No DSMR telegram from {self.port} within {READ_TIMEOUT} seconds "
+                f"at {self.baudrate} baud. Check the cable/adapter, the port, and "
+                "that the DSMR version and baud rate match the meter."
             )
         except SmartmeterError:
             raise
@@ -469,7 +489,9 @@ class DsmrClient(SmartmeterClient):
         self._ensure_session()
         spec = self.specification()
         telegram = self._read_telegram()
-        info = _metering_point_info(telegram, spec, self.port, self.dsmr_version)
+        info = _metering_point_info(
+            telegram, spec, self.port, self.dsmr_version, self.baudrate
+        )
         LOGGER.debug(
             "DSMR: metering point %s with registers %s",
             info["zaehlpunktnummer"],

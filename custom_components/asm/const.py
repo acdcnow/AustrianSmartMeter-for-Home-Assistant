@@ -23,6 +23,8 @@ CONF_PROVIDER = "provider"
 # knows that one.
 CONF_DSMR_VERSION = "dsmr_version"
 CONF_ENCRYPTION_KEY = "encryption_key"
+# The P1 port's speed. "auto" (the default) uses the rate of the DSMR version.
+CONF_BAUDRATE = "baudrate"
 
 # The aWATTar market feed is selected by market area, not by a credential.
 CONF_MARKET_AREA = "market_area"
@@ -77,6 +79,14 @@ CONF_SCAN_INTERVAL = "scan_interval"
 DEFAULT_SCAN_INTERVAL = 60 * 6  # 6 hours
 MIN_SCAN_INTERVAL = 60
 
+# A provider whose meter pushes its values - energyLIVE reads the interface
+# attached to the meter, a DSMR customer interface sends a telegram every 10
+# seconds - can be polled in seconds. Its interval is stored under a key of its
+# own, so a stored value is never mistaken for the other unit.
+CONF_SCAN_INTERVAL_SECONDS = "scan_interval_seconds"
+MIN_LIVE_INTERVAL = 10  # seconds
+LIVE_PROVIDERS = {PROVIDER_ENERGYLIVE, PROVIDER_DSMR}
+
 # Attributes
 ATTR_ZAEHLPUNKT = "zaehlpunkt"
 ATTR_OBIS_CODE = "obis_code"
@@ -95,6 +105,7 @@ __all__ = [
     "ATTR_UNIT",
     "ATTR_ZAEHLPUNKT",
     "CONF_API_KEY",
+    "CONF_BAUDRATE",
     "CONF_COUNTRY_CODE",
     "CONF_DSMR_VERSION",
     "CONF_ENCRYPTION_KEY",
@@ -107,13 +118,16 @@ __all__ = [
     "CONF_PROVIDER",
     "CONF_REREAD_DAYS",
     "CONF_SCAN_INTERVAL",
+    "CONF_SCAN_INTERVAL_SECONDS",
     "CONF_SELECTRA_INPUTS",
     "CONF_SELECTRA_LABEL",
     "CONF_TOKEN",
     "CONF_USERNAME",
     "DEFAULT_SCAN_INTERVAL",
     "DOMAIN",
+    "LIVE_PROVIDERS",
     "LOGGER",
+    "MIN_LIVE_INTERVAL",
     "MIN_SCAN_INTERVAL",
     "OBIS_NAMES",
     "PROVIDERS",
