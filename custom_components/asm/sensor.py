@@ -28,6 +28,7 @@ from .const import (
     PROVIDER_ENERGYLIVE,
     PROVIDER_EWERK_GOESTING,
     PROVIDER_NETZ_NOE,
+    PROVIDER_STADTWERKE_AMSTETTEN,
     PROVIDER_WIENER_NETZE,
 )
 from .coordinator import AustriaSmartMeterCoordinator
@@ -71,6 +72,10 @@ _PROVIDER_PORTALS = {
     PROVIDER_EWERK_GOESTING: (
         "E-Werk Gösting",
         "https://goesting-dav.mein-portal.at/bkp/login",
+    ),
+    PROVIDER_STADTWERKE_AMSTETTEN: (
+        "Stadtwerke Amstetten",
+        "https://amstetten-dav.mein-portal.at/bkp/login",
     ),
 }
 

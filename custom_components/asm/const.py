@@ -50,6 +50,7 @@ PROVIDER_AWATTAR = "awattar"
 PROVIDER_SELECTRA = "selectra"
 PROVIDER_SALZBURGNETZ = "salzburgnetz"
 PROVIDER_EWERK_GOESTING = "ewerk_goesting"
+PROVIDER_STADTWERKE_AMSTETTEN = "stadtwerke_amstetten"
 PROVIDER_STROMNETZ_GRAZ = "stromnetz_graz"
 
 PROVIDERS = {
@@ -62,6 +63,7 @@ PROVIDERS = {
     PROVIDER_SELECTRA: "Selectra tariff planning",
     PROVIDER_SALZBURGNETZ: "Salzburg Netz",
     PROVIDER_EWERK_GOESTING: "E-Werk Gösting",
+    PROVIDER_STADTWERKE_AMSTETTEN: "Stadtwerke Amstetten",
     # PROVIDER_STROMNETZ_GRAZ: "Stromnetz Graz", # In Entwicklung
 }
 
@@ -116,6 +118,7 @@ __all__ = [
     "PROVIDER_NETZ_NOE",
     "PROVIDER_SALZBURGNETZ",
     "PROVIDER_SELECTRA",
+    "PROVIDER_STADTWERKE_AMSTETTEN",
     "PROVIDER_STROMNETZ_GRAZ",
     "PROVIDER_WIENER_NETZE",
 ]
